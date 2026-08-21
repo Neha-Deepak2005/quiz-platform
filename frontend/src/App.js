@@ -1,4 +1,3 @@
-cat > frontend / src / App.js << 'EOF'
 import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 
@@ -6,414 +5,977 @@ const API_BASE = "/api";
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState("login-type");
-  const [loginType, setLoginType] = useState("STUDENT");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [isRegistering, setIsRegistering] = useState(false);
   const [token, setToken] = useState(localStorage.getItem("token"));
-  const [userId, setUserId] = useState(localStorage.getItem("user_id"));
-  const [userRole, setUserRole] = useState(localStorage.getItem("user_role"));
-  const [quizzes, setQuizzes] = useState([]);
-  const [currentQuiz, setCurrentQuiz] = useState(null);
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  const [answers, setAnswers] = useState({});
-  const [attemptId, setAttemptId] = useState(null);
-  const [submitted, setSubmitted] = useState(false);
-  const [result, setResult] = useState(null);
-  const [quizTimer, setQuizTimer] = useState(0);
-  const [adminQuizzes, setAdminQuizzes] = useState([]);
-  const [newQuiz, setNewQuiz] = useState({ title: "", description: "", difficulty: "Easy", duration: 30 });
-  const [currentEditingQuiz, setCurrentEditingQuiz] = useState(null);
-  const [newQuestion, setNewQuestion] = useState({ question_text: "", marks: 1.0, difficulty: "Easy" });
-  const [options, setOptions] = useState([{ text: "", is_correct: false }]);
-  const [showReview, setShowReview] = useState(false);
+  const [role, setRole] = useState(localStorage.getItem("role"));
+  const [user, setUser] = useState(null);
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    if (token) {
-      setCurrentPage(userRole === "ADMIN" ? "admin-dashboard" : "student-dashboard");
-    }
-  }, []);
-
-  const handleLogin = useCallback(async () => {
-    try {
-      const response = await axios.post(`${API_BASE}/auth/login`, { email, password, role: loginType });
-      const { access_token, user_id, role } = response.data;
-      localStorage.setItem("token", access_token);
-      localStorage.setItem("user_id", user_id);
-      localStorage.setItem("user_role", role);
-      setToken(access_token);
-      setUserId(user_id);
-      setUserRole(role);
-      setCurrentPage(role === "ADMIN" ? "admin-dashboard" : "student-dashboard");
-    } catch (error) {
-      alert("Login failed: " + (error.response?.data?.detail || error.message));
-    }
-  }, [email, password, loginType]);
-
-  const handleRegister = useCallback(async () => {
-    if (password !== confirmPassword) {
-      alert("Passwords don't match!");
-      return;
-    }
-    if (password.length < 6) {
-      alert("Password must be at least 6 characters!");
-      return;
-    }
-    try {
-      const response = await axios.post(`${API_BASE}/auth/register`, { email, password, role: "STUDENT" });
-      const { access_token, user_id } = response.data;
-      localStorage.setItem("token", access_token);
-      localStorage.setItem("user_id", user_id);
-      localStorage.setItem("user_role", "STUDENT");
-      setToken(access_token);
-      setUserId(user_id);
-      setUserRole("STUDENT");
-      setCurrentPage("student-dashboard");
-    } catch (error) {
-      alert("Registration failed: " + (error.response?.data?.detail || error.message));
-    }
-  }, [email, password, confirmPassword]);
-
-  const handleLogout = useCallback(() => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user_id");
-    localStorage.removeItem("user_role");
-    setToken(null);
-    setUserId(null);
-    setUserRole(null);
-    setCurrentPage("login-type");
-    setEmail("");
-    setPassword("");
-    setConfirmPassword("");
-  }, []);
-
-  const fetchAdminQuizzes = useCallback(async () => {
-    try {
-      const response = await axios.get(`${API_BASE}/admin/quizzes`);
-      setAdminQuizzes(response.data);
-    } catch (error) {
-      console.error("Failed to fetch admin quizzes:", error);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (currentPage === "admin-dashboard") {
-      fetchAdminQuizzes();
-    }
-  }, [currentPage, fetchAdminQuizzes]);
-
-  const handleCreateQuiz = useCallback(async () => {
-    try {
-      await axios.post(`${API_BASE}/admin/quizzes`, newQuiz);
-      setNewQuiz({ title: "", description: "", difficulty: "Easy", duration: 30 });
-      fetchAdminQuizzes();
-    } catch (error) {
-      alert("Failed to create quiz: " + (error.response?.data?.detail || error.message));
-    }
-  }, [newQuiz, fetchAdminQuizzes]);
-
-  const handleDeleteQuiz = useCallback(async (quizId) => {
-    if (window.confirm("Are you sure you want to delete this quiz?")) {
-      try {
-        await axios.delete(`${API_BASE}/admin/quizzes/${quizId}`);
-        fetchAdminQuizzes();
-      } catch (error) {
-        alert("Failed to delete quiz: " + (error.response?.data?.detail || error.message));
-      }
-    }
-  }, [fetchAdminQuizzes]);
-
-  const handlePublishQuiz = useCallback(async (quizId) => {
-    try {
-      await axios.post(`${API_BASE}/admin/quizzes/${quizId}/publish`);
-      fetchAdminQuizzes();
-      alert("Quiz published successfully!");
-    } catch (error) {
-      alert("Failed to publish quiz: " + (error.response?.data?.detail || error.message));
-    }
-  }, [fetchAdminQuizzes]);
-
-  const handleAddQuestion = useCallback(async () => {
-    if (!newQuestion.question_text) {
-      alert("Please enter a question!");
-      return;
-    }
-    try {
-      await axios.post(`${API_BASE}/admin/quizzes/${currentEditingQuiz}/add-question`, {
-        ...newQuestion,
-        options
-      });
-      setNewQuestion({ question_text: "", marks: 1.0, difficulty: "Easy" });
-      setOptions([{ text: "", is_correct: false }]);
-      alert("Question added successfully!");
-    } catch (error) {
-      alert("Failed to add question: " + (error.response?.data?.detail || error.message));
-    }
-  }, [currentEditingQuiz, newQuestion, options]);
-
-  const fetchPublishedQuizzes = useCallback(async () => {
-    try {
-      const response = await axios.get(`${API_BASE}/quizzes/published`);
-      setQuizzes(response.data);
-    } catch (error) {
-      console.error("Failed to fetch quizzes:", error);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (currentPage === "student-dashboard") {
-      fetchPublishedQuizzes();
-    }
-  }, [currentPage, fetchPublishedQuizzes]);
-
-  const handleStartQuiz = useCallback(async (quizId) => {
-    try {
-      const quizResponse = await axios.get(`${API_BASE}/quizzes/${quizId}`);
-      const quiz = quizResponse.data;
-      setCurrentQuiz(quiz);
-      setQuizTimer(quiz.duration);
-      setCurrentQuestionIndex(0);
-      setAnswers({});
-      setSubmitted(false);
-      setResult(null);
-      const attemptResponse = await axios.post(`${API_BASE}/quizzes/${quizId}/start`);
-      setAttemptId(attemptResponse.data.attempt_id);
-      setCurrentPage("quiz");
-    } catch (error) {
-      alert("Failed to start quiz: " + (error.response?.data?.detail || error.message));
-    }
-  }, []);
-
-  useEffect(() => {
-    if (currentPage !== "quiz" || submitted) return;
-    const interval = setInterval(() => {
-      setQuizTimer((prev) => {
-        if (prev <= 1) {
-          handleSubmit();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [currentPage, submitted]);
-
-  const handleSubmit = useCallback(async () => {
-    const answersArray = Object.entries(answers).map(([questionId, selectedOptionId]) => ({
-      question_id: parseInt(questionId),
-      selected_option_id: selectedOptionId ? parseInt(selectedOptionId) : null
-    }));
-    try {
-      const response = await axios.post(`${API_BASE}/quizzes/${currentQuiz.id}/submit`, { answers: answersArray });
-      setResult(response.data);
-      setSubmitted(true);
-    } catch (error) {
-      alert("Failed to submit quiz: " + (error.response?.data?.detail || error.message));
-    }
-  }, [answers, currentQuiz]);
-
-  const handleSelectOption = useCallback((questionId, optionId) => {
-    setAnswers((prev) => ({
-      ...prev,
-      [questionId]: optionId
-    }));
-  }, []);
-
-  const handleNextQuestion = useCallback(() => {
-    if (currentQuestionIndex < currentQuiz.questions.length - 1) {
-      setCurrentQuestionIndex((prev) => prev + 1);
-    }
-  }, [currentQuestionIndex, currentQuiz]);
-
-  const handlePreviousQuestion = useCallback(() => {
-    if (currentQuestionIndex > 0) {
-      setCurrentQuestionIndex((prev) => prev - 1);
-    }
-  }, [currentQuestionIndex]);
-
-  const handleJumpToQuestion = useCallback((index) => {
-    setCurrentQuestionIndex(index);
-  }, []);
-
+  // Login Type Selection
   if (currentPage === "login-type") {
     return (
-      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh", backgroundColor: "#f5f5f5" }}>
-        <div style={{ textAlign: "center", backgroundColor: "white", padding: "40px", borderRadius: "8px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
-          <h1>Welcome to Quiz Platform</h1>
-          <div style={{ marginTop: "30px", display: "flex", gap: "20px", justifyContent: "center" }}>
-            <button onClick={() => { setLoginType("STUDENT"); setIsRegistering(false); setCurrentPage("login"); }} style={{ padding: "12px 24px", fontSize: "16px", backgroundColor: "#007bff", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}>
-              Student
-            </button>
-            <button onClick={() => { setLoginType("ADMIN"); setIsRegistering(false); setCurrentPage("login"); }} style={{ padding: "12px 24px", fontSize: "16px", backgroundColor: "#28a745", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}>
-              Admin
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+      <div style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+        fontFamily: "system-ui, -apple-system, sans-serif",
+        margin: 0,
+        padding: "20px"
+      }}>
+        <div style={{
+          textAlign: "center",
+          background: "white",
+          padding: "60px 40px",
+          borderRadius: "15px",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+          maxWidth: "400px",
+          width: "100%"
+        }}>
+          <h1 style={{
+            fontSize: "32px",
+            fontWeight: "700",
+            color: "#333",
+            marginBottom: "10px"
+          }}>Welcome to Quiz Platform</h1>
+          <p style={{
+            fontSize: "16px",
+            color: "#666",
+            marginBottom: "40px"
+          }}>Select your login type to continue</p>
 
-  if (currentPage === "login") {
-    return (
-      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh", backgroundColor: "#f5f5f5" }}>
-        <div style={{ width: "400px", backgroundColor: "white", padding: "40px", borderRadius: "8px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}>
-          <h1>{isRegistering ? "Register" : "Login"} as {loginType}</h1>
-          <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} style={{ width: "100%", padding: "10px", marginTop: "15px", marginBottom: "10px", border: "1px solid #ddd", borderRadius: "4px", boxSizing: "border-box" }} />
-          <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} style={{ width: "100%", padding: "10px", marginBottom: "10px", border: "1px solid #ddd", borderRadius: "4px", boxSizing: "border-box" }} />
-          {isRegistering && (<input type="password" placeholder="Confirm Password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} style={{ width: "100%", padding: "10px", marginBottom: "10px", border: "1px solid #ddd", borderRadius: "4px", boxSizing: "border-box" }} />)}
-          <button onClick={isRegistering ? handleRegister : handleLogin} style={{ width: "100%", padding: "12px", marginTop: "15px", backgroundColor: isRegistering ? "#ffc107" : "#007bff", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "16px" }}>{isRegistering ? "Register" : "Login"}</button>
-          <button onClick={() => { setIsRegistering(!isRegistering); setEmail(""); setPassword(""); setConfirmPassword(""); }} style={{ width: "100%", padding: "12px", marginTop: "10px", backgroundColor: "#6c757d", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}>{isRegistering ? "Back to Login" : "Register Here"}</button>
-          <button onClick={() => { setCurrentPage("login-type"); setEmail(""); setPassword(""); }} style={{ width: "100%", padding: "12px", marginTop: "10px", backgroundColor: "#dc3545", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}>Back</button>
-        </div>
-      </div>
-    );
-  }
-
-  if (currentPage === "admin-dashboard") {
-    return (
-      <div style={{ padding: "20px", maxWidth: "1200px", margin: "0 auto" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "30px" }}>
-          <h1>Admin Dashboard</h1>
-          <button onClick={handleLogout} style={{ padding: "10px 20px", backgroundColor: "#dc3545", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}>Logout</button>
-        </div>
-        <div style={{ backgroundColor: "white", padding: "20px", borderRadius: "8px", marginBottom: "30px", boxShadow: "0 2px 4px rgba(0,0,0,0.1)" }}>
-          <h2>Create New Quiz</h2>
-          <input type="text" placeholder="Quiz Title" value={newQuiz.title} onChange={(e) => setNewQuiz({ ...newQuiz, title: e.target.value })} style={{ width: "100%", padding: "10px", marginBottom: "10px", border: "1px solid #ddd", borderRadius: "4px", boxSizing: "border-box" }} />
-          <input type="text" placeholder="Description" value={newQuiz.description} onChange={(e) => setNewQuiz({ ...newQuiz, description: e.target.value })} style={{ width: "100%", padding: "10px", marginBottom: "10px", border: "1px solid #ddd", borderRadius: "4px", boxSizing: "border-box" }} />
-          <select value={newQuiz.difficulty} onChange={(e) => setNewQuiz({ ...newQuiz, difficulty: e.target.value })} style={{ width: "100%", padding: "10px", marginBottom: "10px", border: "1px solid #ddd", borderRadius: "4px", boxSizing: "border-box" }}><option>Easy</option><option>Medium</option><option>Hard</option></select>
-          <input type="number" placeholder="Duration (minutes)" value={newQuiz.duration} onChange={(e) => setNewQuiz({ ...newQuiz, duration: parseInt(e.target.value) })} style={{ width: "100%", padding: "10px", marginBottom: "10px", border: "1px solid #ddd", borderRadius: "4px", boxSizing: "border-box" }} />
-          <button onClick={handleCreateQuiz} style={{ width: "100%", padding: "12px", backgroundColor: "#007bff", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "16px" }}>Create Quiz</button>
-        </div>
-        <div><h2>My Quizzes</h2>{adminQuizzes.map((quiz) => (<div key={quiz.id} style={{ backgroundColor: "white", padding: "15px", marginBottom: "15px", borderRadius: "8px", boxShadow: "0 2px 4px rgba(0,0,0,0.1)" }}><h3>{quiz.title}</h3><p>{quiz.description}</p><p>Status: {quiz.status}</p><div style={{ display: "flex", gap: "10px" }}><button onClick={() => setCurrentEditingQuiz(quiz.id)} style={{ padding: "8px 16px", backgroundColor: "#17a2b8", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}>Add Question</button>{quiz.status === "DRAFT" && (<button onClick={() => handlePublishQuiz(quiz.id)} style={{ padding: "8px 16px", backgroundColor: "#28a745", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}>Publish</button>)}<button onClick={() => handleDeleteQuiz(quiz.id)} style={{ padding: "8px 16px", backgroundColor: "#dc3545", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}>Delete</button></div></div>))}</div>
-        {currentEditingQuiz && (<div style={{ backgroundColor: "white", padding: "20px", marginTop: "20px", borderRadius: "8px", boxShadow: "0 2px 4px rgba(0,0,0,0.1)" }}><h2>Add Question to Quiz</h2><input type="text" placeholder="Question Text" value={newQuestion.question_text} onChange={(e) => setNewQuestion({ ...newQuestion, question_text: e.target.value })} style={{ width: "100%", padding: "10px", marginBottom: "10px", border: "1px solid #ddd", borderRadius: "4px", boxSizing: "border-box" }} /><input type="number" placeholder="Marks" value={newQuestion.marks} onChange={(e) => setNewQuestion({ ...newQuestion, marks: parseFloat(e.target.value) })} style={{ width: "100%", padding: "10px", marginBottom: "10px", border: "1px solid #ddd", borderRadius: "4px", boxSizing: "border-box" }} /><h3>Options</h3>{options.map((option, index) => (<div key={index} style={{ marginBottom: "10px", display: "flex", gap: "10px", alignItems: "center" }}><input type="text" placeholder={`Option ${index + 1}`} value={option.text} onChange={(e) => { const newOptions = [...options]; newOptions[index].text = e.target.value; setOptions(newOptions); }} style={{ flex: 1, padding: "10px", border: "1px solid #ddd", borderRadius: "4px", boxSizing: "border-box" }} /><label style={{ display: "flex", alignItems: "center", gap: "5px" }}><input type="radio" name="correctAnswer" checked={option.is_correct} onChange={() => { const newOptions = options.map((o, i) => ({ ...o, is_correct: i === index })); setOptions(newOptions); }} />Correct</label></div>))}<button onClick={() => setOptions([...options, { text: "", is_correct: false }])} style={{ width: "100%", padding: "10px", marginBottom: "10px", backgroundColor: "#6c757d", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}>Add Option</button><button onClick={handleAddQuestion} style={{ width: "100%", padding: "12px", backgroundColor: "#007bff", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "16px" }}>Add Question</button><button onClick={() => setCurrentEditingQuiz(null)} style={{ width: "100%", padding: "10px", marginTop: "10px", backgroundColor: "#dc3545", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}>Done</button></div>)}
-      </div>
-    );
-  }
-
-  if (currentPage === "student-dashboard") {
-    return (
-      <div style={{ padding: "20px", maxWidth: "1200px", margin: "0 auto" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "30px" }}>
-          <h1>Browse Quizzes</h1>
-          <button onClick={handleLogout} style={{ padding: "10px 20px", backgroundColor: "#dc3545", color: "white", border: "none", borderRadius: "4px", cursor: "pointer" }}>Logout</button>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "20px" }}>
-          {quizzes.map((quiz) => (<div key={quiz.id} style={{ backgroundColor: "white", padding: "20px", borderRadius: "8px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)" }}><h3>{quiz.title}</h3><p>{quiz.description}</p><p><strong>Difficulty:</strong> {quiz.difficulty}</p><p><strong>Duration:</strong> {quiz.duration} minutes</p><button onClick={() => handleStartQuiz(quiz.id)} style={{ width: "100%", padding: "12px", backgroundColor: "#007bff", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "16px" }}>Start Quiz</button></div>))}
-        </div>
-      </div>
-    );
-  }
-
-  if (currentPage === "quiz") {
-    const question = currentQuiz.questions[currentQuestionIndex];
-    const minutes = Math.floor(quizTimer / 60);
-    const seconds = quizTimer % 60;
-
-    if (submitted) {
-      return (
-        <div style={{ padding: "20px", maxWidth: "800px", margin: "0 auto" }}>
-          <h1>Quiz Results</h1>
-          <div style={{ backgroundColor: result.status === "PASSED" ? "#d4edda" : "#f8d7da", padding: "20px", borderRadius: "8px", marginBottom: "20px" }}>
-            <h2>{result.status === "PASSED" ? "✓ PASSED" : "✗ FAILED"}</h2>
-            <p>Score: {result.score}/{currentQuiz.questions.reduce((sum, q) => sum + q.marks, 0)}</p>
-            <p>Percentage: {result.percentage.toFixed(2)}%</p>
-          </div>
-          <button onClick={() => setShowReview(!showReview)} style={{ padding: "10px 20px", backgroundColor: "#17a2b8", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", marginBottom: "20px" }}>
-            {showReview ? "Hide Answer Review" : "View Answer Review"}
+          <button
+            onClick={() => setCurrentPage("login")}
+            style={{
+              width: "100%",
+              padding: "15px",
+              marginBottom: "15px",
+              fontSize: "16px",
+              fontWeight: "600",
+              border: "none",
+              borderRadius: "8px",
+              background: "#667eea",
+              color: "white",
+              cursor: "pointer",
+              transition: "background 0.3s"
+            }}
+            onMouseEnter={(e) => e.target.style.background = "#5568d3"}
+            onMouseLeave={(e) => e.target.style.background = "#667eea"}
+          >
+            👤 Student Login
           </button>
-          {showReview && (
-            <div>
-              {currentQuiz.questions.map((q, idx) => {
-                const userAnswer = answers[q.id];
-                const correctOption = q.options.find((o) => o.is_correct);
-                const userOption = q.options.find((o) => o.id === parseInt(userAnswer));
-                return (
-                  <div key={q.id} style={{ backgroundColor: "white", padding: "15px", marginBottom: "15px", borderRadius: "8px", border: `3px solid ${userOption?.is_correct ? "#28a745" : "#dc3545"}` }}>
-                    <p><strong>Q{idx + 1}: {q.question_text}</strong></p>
-                    <p style={{ color: "#28a745" }}>✓ Correct Answer: {correctOption?.option_text}</p>
-                    {userOption ? (
-                      <p style={{ color: userOption.is_correct ? "#28a745" : "#dc3545" }}>
-                        Your Answer: {userOption.option_text}
-                      </p>
-                    ) : (
-                      <p style={{ color: "#dc3545" }}>You didn't answer this question</p>
-                    )}
-                  </div>
-                );
-              })}
+
+          <button
+            onClick={() => setCurrentPage("login")}
+            style={{
+              width: "100%",
+              padding: "15px",
+              marginBottom: "15px",
+              fontSize: "16px",
+              fontWeight: "600",
+              border: "none",
+              borderRadius: "8px",
+              background: "#764ba2",
+              color: "white",
+              cursor: "pointer",
+              transition: "background 0.3s"
+            }}
+            onMouseEnter={(e) => e.target.style.background = "#65408a"}
+            onMouseLeave={(e) => e.target.style.background = "#764ba2"}
+          >
+            👨‍💼 Admin Login
+          </button>
+
+          <p style={{
+            fontSize: "12px",
+            color: "#999",
+            marginTop: "30px"
+          }}>Demo Credentials:<br />
+            Student: student@quiz.com / Student@123<br />
+            Admin: admin@quiz.com / Admin@123
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Login/Register Page
+  if (currentPage === "login") {
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [isRegister, setIsRegister] = useState(false);
+    const [confirmPassword, setConfirmPassword] = useState("");
+    const [registerRole, setRegisterRole] = useState("STUDENT");
+
+    const handleLogin = async (e) => {
+      e.preventDefault();
+      setLoading(true);
+      try {
+        const res = await axios.post(`${API_BASE}/auth/login`, {
+          email,
+          password
+        });
+        localStorage.setItem("token", res.data.access_token);
+        localStorage.setItem("role", res.data.role);
+        setToken(res.data.access_token);
+        setRole(res.data.role);
+        setUser(res.data.user);
+        setCurrentPage(res.data.role === "ADMIN" ? "admin-dashboard" : "student-dashboard");
+      } catch (err) {
+        setMessage(err.response?.data?.detail || "Login failed");
+      }
+      setLoading(false);
+    };
+
+    const handleRegister = async (e) => {
+      e.preventDefault();
+      if (password !== confirmPassword) {
+        setMessage("Passwords do not match");
+        return;
+      }
+      setLoading(true);
+      try {
+        await axios.post(`${API_BASE}/auth/register`, {
+          email,
+          password,
+          role: registerRole
+        });
+        setMessage("Registration successful! Please login.");
+        setIsRegister(false);
+        setEmail("");
+        setPassword("");
+        setConfirmPassword("");
+      } catch (err) {
+        setMessage(err.response?.data?.detail || "Registration failed");
+      }
+      setLoading(false);
+    };
+
+    return (
+      <div style={{
+        minHeight: "100vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+        fontFamily: "system-ui, -apple-system, sans-serif",
+        padding: "20px"
+      }}>
+        <div style={{
+          background: "white",
+          padding: "40px",
+          borderRadius: "15px",
+          boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
+          width: "100%",
+          maxWidth: "400px"
+        }}>
+          <h2 style={{
+            textAlign: "center",
+            color: "#333",
+            marginBottom: "30px"
+          }}>{isRegister ? "Register" : "Login"}</h2>
+
+          {message && (
+            <div style={{
+              background: "#f8d7da",
+              color: "#721c24",
+              padding: "12px",
+              borderRadius: "5px",
+              marginBottom: "20px",
+              fontSize: "14px"
+            }}>
+              {message}
             </div>
           )}
-          <button onClick={() => { setCurrentPage("student-dashboard"); setCurrentQuiz(null); }} style={{ width: "100%", padding: "12px", backgroundColor: "#007bff", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "16px" }}>
-            Back to Quizzes
-          </button>
-        </div>
-      );
-    }
 
-    return (
-      <div style={{ display: "flex", height: "100vh", backgroundColor: "#f5f5f5" }}>
-        <div style={{ width: "200px", backgroundColor: "white", padding: "20px", boxShadow: "0 2px 8px rgba(0,0,0,0.1)", overflowY: "auto" }}>
-          <h3>Progress</h3>
-          <div style={{ marginTop: "15px" }}>
-            {currentQuiz.questions.map((q, idx) => (
-              <button
-                key={q.id}
-                onClick={() => handleJumpToQuestion(idx)}
+          <form onSubmit={isRegister ? handleRegister : handleLogin}>
+            <div style={{ marginBottom: "20px" }}>
+              <label style={{
+                display: "block",
+                marginBottom: "8px",
+                color: "#333",
+                fontWeight: "600"
+              }}>Email</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
                 style={{
                   width: "100%",
-                  padding: "10px",
-                  marginBottom: "8px",
-                  backgroundColor: answers[q.id] ? "#28a745" : "#e0e0e0",
-                  color: answers[q.id] ? "white" : "black",
-                  border: currentQuestionIndex === idx ? "3px solid #007bff" : "none",
-                  borderRadius: "4px",
-                  cursor: "pointer",
-                  fontWeight: currentQuestionIndex === idx ? "bold" : "normal"
+                  padding: "12px",
+                  border: "1px solid #ddd",
+                  borderRadius: "5px",
+                  fontSize: "16px",
+                  boxSizing: "border-box"
                 }}
-              >
-                Q{idx + 1}
-              </button>
-            ))}
+              />
+            </div>
+
+            <div style={{ marginBottom: "20px" }}>
+              <label style={{
+                display: "block",
+                marginBottom: "8px",
+                color: "#333",
+                fontWeight: "600"
+              }}>Password</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                style={{
+                  width: "100%",
+                  padding: "12px",
+                  border: "1px solid #ddd",
+                  borderRadius: "5px",
+                  fontSize: "16px",
+                  boxSizing: "border-box"
+                }}
+              />
+            </div>
+
+            {isRegister && (
+              <>
+                <div style={{ marginBottom: "20px" }}>
+                  <label style={{
+                    display: "block",
+                    marginBottom: "8px",
+                    color: "#333",
+                    fontWeight: "600"
+                  }}>Confirm Password</label>
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    required
+                    style={{
+                      width: "100%",
+                      padding: "12px",
+                      border: "1px solid #ddd",
+                      borderRadius: "5px",
+                      fontSize: "16px",
+                      boxSizing: "border-box"
+                    }}
+                  />
+                </div>
+
+                <div style={{ marginBottom: "20px" }}>
+                  <label style={{
+                    display: "block",
+                    marginBottom: "8px",
+                    color: "#333",
+                    fontWeight: "600"
+                  }}>Role</label>
+                  <select
+                    value={registerRole}
+                    onChange={(e) => setRegisterRole(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "12px",
+                      border: "1px solid #ddd",
+                      borderRadius: "5px",
+                      fontSize: "16px",
+                      boxSizing: "border-box"
+                    }}
+                  >
+                    <option value="STUDENT">Student</option>
+                    <option value="ADMIN">Admin</option>
+                  </select>
+                </div>
+              </>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              style={{
+                width: "100%",
+                padding: "12px",
+                background: "#667eea",
+                color: "white",
+                border: "none",
+                borderRadius: "5px",
+                fontSize: "16px",
+                fontWeight: "600",
+                cursor: "pointer",
+                opacity: loading ? 0.6 : 1
+              }}
+            >
+              {loading ? "Loading..." : (isRegister ? "Register" : "Login")}
+            </button>
+          </form>
+
+          <div style={{
+            marginTop: "20px",
+            textAlign: "center"
+          }}>
+            <button
+              onClick={() => {
+                setIsRegister(!isRegister);
+                setMessage("");
+              }}
+              style={{
+                background: "none",
+                border: "none",
+                color: "#667eea",
+                cursor: "pointer",
+                fontSize: "14px",
+                textDecoration: "underline"
+              }}
+            >
+              {isRegister ? "Back to Login" : "Create Account"}
+            </button>
+          </div>
+
+          <div style={{
+            marginTop: "20px",
+            textAlign: "center"
+          }}>
+            <button
+              onClick={() => {
+                setCurrentPage("login-type");
+                setMessage("");
+              }}
+              style={{
+                background: "none",
+                border: "none",
+                color: "#999",
+                cursor: "pointer",
+                fontSize: "14px"
+              }}
+            >
+              ← Back to Type Selection
+            </button>
           </div>
         </div>
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-between", padding: "40px" }}>
-          <div style={{ textAlign: "center", backgroundColor: quizTimer < 60 ? "#dc3545" : "#007bff", color: "white", padding: "15px", borderRadius: "8px", marginBottom: "20px" }}>
-            <h2>Time Remaining: {String(minutes).padStart(2, "0")}:{String(seconds).padStart(2, "0")}</h2>
+      </div>
+    );
+  }
+
+  // Admin Dashboard
+  if (currentPage === "admin-dashboard" && token) {
+    const [quizzes, setQuizzes] = useState([]);
+    const [quizTitle, setQuizTitle] = useState("");
+    const [quizDesc, setQuizDesc] = useState("");
+    const [quizDuration, setQuizDuration] = useState("30");
+
+    useEffect(() => {
+      fetchQuizzes();
+    }, []);
+
+    const fetchQuizzes = async () => {
+      try {
+        const res = await axios.get(`${API_BASE}/quizzes`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setQuizzes(res.data);
+      } catch (err) {
+        console.error("Error fetching quizzes:", err);
+      }
+    };
+
+    const handleCreateQuiz = async (e) => {
+      e.preventDefault();
+      try {
+        await axios.post(`${API_BASE}/quizzes`, {
+          title: quizTitle,
+          description: quizDesc,
+          duration_minutes: parseInt(quizDuration)
+        }, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setQuizTitle("");
+        setQuizDesc("");
+        setQuizDuration("30");
+        fetchQuizzes();
+      } catch (err) {
+        alert(err.response?.data?.detail || "Failed to create quiz");
+      }
+    };
+
+    return (
+      <div style={{
+        minHeight: "100vh",
+        background: "#f5f7fa",
+        fontFamily: "system-ui, -apple-system, sans-serif"
+      }}>
+        <header style={{
+          background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+          color: "white",
+          padding: "20px 40px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center"
+        }}>
+          <h1>Admin Dashboard</h1>
+          <button
+            onClick={() => {
+              localStorage.removeItem("token");
+              localStorage.removeItem("role");
+              setToken(null);
+              setCurrentPage("login-type");
+            }}
+            style={{
+              padding: "10px 20px",
+              background: "rgba(255,255,255,0.2)",
+              color: "white",
+              border: "none",
+              borderRadius: "5px",
+              cursor: "pointer"
+            }}
+          >
+            Logout
+          </button>
+        </header>
+
+        <div style={{ padding: "40px", maxWidth: "1200px", margin: "0 auto" }}>
+          <div style={{
+            background: "white",
+            padding: "30px",
+            borderRadius: "10px",
+            marginBottom: "30px",
+            boxShadow: "0 2px 10px rgba(0,0,0,0.1)"
+          }}>
+            <h2>Create New Quiz</h2>
+            <form onSubmit={handleCreateQuiz}>
+              <div style={{ marginBottom: "20px" }}>
+                <label style={{
+                  display: "block",
+                  marginBottom: "8px",
+                  fontWeight: "600"
+                }}>Quiz Title</label>
+                <input
+                  type="text"
+                  value={quizTitle}
+                  onChange={(e) => setQuizTitle(e.target.value)}
+                  required
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    border: "1px solid #ddd",
+                    borderRadius: "5px",
+                    boxSizing: "border-box"
+                  }}
+                />
+              </div>
+
+              <div style={{ marginBottom: "20px" }}>
+                <label style={{
+                  display: "block",
+                  marginBottom: "8px",
+                  fontWeight: "600"
+                }}>Description</label>
+                <textarea
+                  value={quizDesc}
+                  onChange={(e) => setQuizDesc(e.target.value)}
+                  rows="4"
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    border: "1px solid #ddd",
+                    borderRadius: "5px",
+                    boxSizing: "border-box"
+                  }}
+                />
+              </div>
+
+              <div style={{ marginBottom: "20px" }}>
+                <label style={{
+                  display: "block",
+                  marginBottom: "8px",
+                  fontWeight: "600"
+                }}>Duration (minutes)</label>
+                <input
+                  type="number"
+                  value={quizDuration}
+                  onChange={(e) => setQuizDuration(e.target.value)}
+                  min="1"
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    border: "1px solid #ddd",
+                    borderRadius: "5px",
+                    boxSizing: "border-box"
+                  }}
+                />
+              </div>
+
+              <button
+                type="submit"
+                style={{
+                  padding: "12px 30px",
+                  background: "#667eea",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "5px",
+                  cursor: "pointer",
+                  fontWeight: "600"
+                }}
+              >
+                Create Quiz
+              </button>
+            </form>
           </div>
-          <div style={{ flex: 1 }}>
-            <h2>Question {currentQuestionIndex + 1} of {currentQuiz.questions.length}</h2>
-            <h3 style={{ marginTop: "20px" }}>{question.question_text}</h3>
-            <div style={{ marginTop: "20px" }}>
-              {question.options.map((option) => (
-                <label key={option.id} style={{ display: "block", marginBottom: "15px", padding: "12px", border: "2px solid #ddd", borderRadius: "4px", cursor: "pointer", backgroundColor: answers[question.id] === option.id ? "#e7f3ff" : "white" }}>
-                  <input
-                    type="radio"
-                    name="option"
-                    value={option.id}
-                    checked={answers[question.id] === option.id}
-                    onChange={() => handleSelectOption(question.id, option.id)}
-                    style={{ marginRight: "10px", cursor: "pointer" }}
-                  />
-                  {option.option_text}
-                </label>
+
+          <div>
+            <h2>Your Quizzes</h2>
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+              gap: "20px"
+            }}>
+              {quizzes.map((quiz) => (
+                <div key={quiz.id} style={{
+                  background: "white",
+                  padding: "20px",
+                  borderRadius: "10px",
+                  boxShadow: "0 2px 10px rgba(0,0,0,0.1)"
+                }}>
+                  <h3>{quiz.title}</h3>
+                  <p style={{ color: "#666" }}>{quiz.description}</p>
+                  <p style={{ fontSize: "14px", color: "#999" }}>
+                    Duration: {quiz.duration_minutes} minutes
+                  </p>
+                  <button
+                    onClick={() => setCurrentPage(`quiz-edit-${quiz.id}`)}
+                    style={{
+                      width: "100%",
+                      padding: "10px",
+                      background: "#667eea",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "5px",
+                      cursor: "pointer"
+                    }}
+                  >
+                    Edit Quiz
+                  </button>
+                </div>
               ))}
             </div>
           </div>
-          <div style={{ display: "flex", gap: "15px", marginTop: "30px" }}>
-            <button onClick={handlePreviousQuestion} disabled={currentQuestionIndex === 0} style={{ flex: 1, padding: "12px", backgroundColor: currentQuestionIndex === 0 ? "#ccc" : "#6c757d", color: "white", border: "none", borderRadius: "4px", cursor: currentQuestionIndex === 0 ? "not-allowed" : "pointer", fontSize: "16px" }}>
-              Previousss
-            </button>
-            <button onClick={handleNextQuestion} disabled={currentQuestionIndex === currentQuiz.questions.length - 1} style={{ flex: 1, padding: "12px", backgroundColor: currentQuestionIndex === currentQuiz.questions.length - 1 ? "#ccc" : "#6c757d", color: "white", border: "none", borderRadius: "4px", cursor: currentQuestionIndex === currentQuiz.questions.length - 1 ? "not-allowed" : "pointer", fontSize: "16px" }}>
-              Next
-            </button>
-            <button onClick={handleSubmit} style={{ flex: 1, padding: "12px", backgroundColor: "#28a745", color: "white", border: "none", borderRadius: "4px", cursor: "pointer", fontSize: "16px" }}>
-              Submit Quiz
-            </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Student Dashboard
+  if (currentPage === "student-dashboard" && token) {
+    const [quizzes, setQuizzes] = useState([]);
+
+    useEffect(() => {
+      fetchAvailableQuizzes();
+    }, []);
+
+    const fetchAvailableQuizzes = async () => {
+      try {
+        const res = await axios.get(`${API_BASE}/quizzes`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setQuizzes(res.data);
+      } catch (err) {
+        console.error("Error fetching quizzes:", err);
+      }
+    };
+
+    return (
+      <div style={{
+        minHeight: "100vh",
+        background: "#f5f7fa",
+        fontFamily: "system-ui, -apple-system, sans-serif"
+      }}>
+        <header style={{
+          background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+          color: "white",
+          padding: "20px 40px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center"
+        }}>
+          <h1>Student Dashboard</h1>
+          <button
+            onClick={() => {
+              localStorage.removeItem("token");
+              localStorage.removeItem("role");
+              setToken(null);
+              setCurrentPage("login-type");
+            }}
+            style={{
+              padding: "10px 20px",
+              background: "rgba(255,255,255,0.2)",
+              color: "white",
+              border: "none",
+              borderRadius: "5px",
+              cursor: "pointer"
+            }}
+          >
+            Logout
+          </button>
+        </header>
+
+        <div style={{ padding: "40px", maxWidth: "1200px", margin: "0 auto" }}>
+          <h2>Available Quizzes</h2>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+            gap: "20px"
+          }}>
+            {quizzes.map((quiz) => (
+              <div key={quiz.id} style={{
+                background: "white",
+                padding: "20px",
+                borderRadius: "10px",
+                boxShadow: "0 2px 10px rgba(0,0,0,0.1)"
+              }}>
+                <h3>{quiz.title}</h3>
+                <p style={{ color: "#666" }}>{quiz.description}</p>
+                <p style={{ fontSize: "14px", color: "#999" }}>
+                  Duration: {quiz.duration_minutes} minutes
+                </p>
+                <button
+                  onClick={() => setCurrentPage(`quiz-${quiz.id}`)}
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    background: "#667eea",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "5px",
+                    cursor: "pointer"
+                  }}
+                >
+                  Start Quiz
+                </button>
+              </div>
+            ))}
           </div>
         </div>
       </div>
     );
   }
+
+  // Quiz Page
+  if (currentPage.startsWith("quiz-") && currentPage !== "quiz-edit" && token) {
+    const quizId = parseInt(currentPage.split("-")[1]);
+    return <QuizPage quizId={quizId} token={token} onComplete={(results) => {
+      setCurrentPage(`results-${quizId}`);
+      window.quizResults = results;
+    }} />;
+  }
+
+  // Results Page
+  if (currentPage.startsWith("results-") && token) {
+    const quizId = parseInt(currentPage.split("-")[1]);
+    const results = window.quizResults;
+    return <ResultsPage quizId={quizId} results={results} token={token} onBack={() => setCurrentPage("student-dashboard")} />;
+  }
+
+  return (
+    <div style={{
+      minHeight: "100vh",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontFamily: "system-ui, -apple-system, sans-serif"
+    }}>
+      <div style={{ textAlign: "center" }}>
+        <h1>Loading...</h1>
+      </div>
+    </div>
+  );
 }
-EOF
+
+function QuizPage({ quizId, token, onComplete }) {
+  const [quiz, setQuiz] = useState(null);
+  const [currentQuestion, setCurrentQuestion] = useState(0);
+  const [answers, setAnswers] = useState({});
+  const [timeLeft, setTimeLeft] = useState(null);
+  const [submitted, setSubmitted] = useState(false);
+
+  useEffect(() => {
+    fetchQuiz();
+  }, [quizId]);
+
+  useEffect(() => {
+    if (!quiz || submitted) return;
+    if (timeLeft === null) {
+      setTimeLeft(quiz.duration_minutes * 60);
+      return;
+    }
+    if (timeLeft <= 0) {
+      handleSubmit();
+      return;
+    }
+    const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [timeLeft, quiz, submitted]);
+
+  const fetchQuiz = async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/quizzes/${quizId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setQuiz(res.data);
+    } catch (err) {
+      alert("Error loading quiz");
+    }
+  };
+
+  const handleSubmit = async () => {
+    setSubmitted(true);
+    try {
+      const res = await axios.post(`${API_BASE}/quizzes/${quizId}/submit`, {
+        answers: answers
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      onComplete(res.data);
+    } catch (err) {
+      alert("Error submitting quiz");
+    }
+  };
+
+  if (!quiz) return <div>Loading quiz...</div>;
+
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  return (
+    <div style={{
+      minHeight: "100vh",
+      background: "#f5f7fa",
+      padding: "20px",
+      fontFamily: "system-ui, -apple-system, sans-serif"
+    }}>
+      <div style={{ maxWidth: "800px", margin: "0 auto" }}>
+        <div style={{
+          background: "white",
+          padding: "20px",
+          borderRadius: "10px",
+          marginBottom: "20px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center"
+        }}>
+          <h2>{quiz.title}</h2>
+          <div style={{ fontSize: "20px", fontWeight: "bold", color: timeLeft < 60 ? "#d32f2f" : "#667eea" }}>
+            {formatTime(timeLeft || 0)}
+          </div>
+        </div>
+
+        <div style={{
+          display: "flex",
+          gap: "5px",
+          marginBottom: "20px",
+          flexWrap: "wrap"
+        }}>
+          {quiz.questions.map((_, idx) => (
+            <button
+              key={idx}
+              onClick={() => setCurrentQuestion(idx)}
+              style={{
+                width: "40px",
+                height: "40px",
+                padding: "0",
+                border: "none",
+                borderRadius: "5px",
+                background: answers[quiz.questions[idx].id] ? "#4caf50" : (idx === currentQuestion ? "#667eea" : "#ddd"),
+                color: answers[quiz.questions[idx].id] ? "white" : (idx === currentQuestion ? "white" : "#333"),
+                cursor: "pointer",
+                fontWeight: "bold"
+              }}
+            >
+              {idx + 1}
+            </button>
+          ))}
+        </div>
+
+        <div style={{
+          background: "white",
+          padding: "30px",
+          borderRadius: "10px",
+          marginBottom: "20px"
+        }}>
+          <h3>{quiz.questions[currentQuestion].text}</h3>
+          <div style={{ marginTop: "20px" }}>
+            {quiz.questions[currentQuestion].options.map((option) => (
+              <label key={option.id} style={{
+                display: "flex",
+                alignItems: "center",
+                padding: "12px",
+                marginBottom: "10px",
+                border: "2px solid #ddd",
+                borderRadius: "5px",
+                cursor: "pointer",
+                background: answers[quiz.questions[currentQuestion].id] === option.id ? "#e3f2fd" : "white",
+                borderColor: answers[quiz.questions[currentQuestion].id] === option.id ? "#667eea" : "#ddd"
+              }}>
+                <input
+                  type="radio"
+                  name={`question-${quiz.questions[currentQuestion].id}`}
+                  value={option.id}
+                  checked={answers[quiz.questions[currentQuestion].id] === option.id}
+                  onChange={(e) => setAnswers({
+                    ...answers,
+                    [quiz.questions[currentQuestion].id]: parseInt(e.target.value)
+                  })}
+                  style={{ marginRight: "10px" }}
+                />
+                {option.text}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: "10px" }}>
+          <button
+            onClick={() => setCurrentQuestion(Math.max(0, currentQuestion - 1))}
+            disabled={currentQuestion === 0}
+            style={{
+              padding: "10px 20px",
+              background: "#ddd",
+              border: "none",
+              borderRadius: "5px",
+              cursor: "pointer",
+              opacity: currentQuestion === 0 ? 0.5 : 1
+            }}
+          >
+            Previous
+          </button>
+          <button
+            onClick={() => setCurrentQuestion(Math.min(quiz.questions.length - 1, currentQuestion + 1))}
+            disabled={currentQuestion === quiz.questions.length - 1}
+            style={{
+              padding: "10px 20px",
+              background: "#ddd",
+              border: "none",
+              borderRadius: "5px",
+              cursor: "pointer",
+              opacity: currentQuestion === quiz.questions.length - 1 ? 0.5 : 1,
+              flex: 1
+            }}
+          >
+            Next
+          </button>
+          <button
+            onClick={handleSubmit}
+            style={{
+              padding: "10px 30px",
+              background: "#4caf50",
+              color: "white",
+              border: "none",
+              borderRadius: "5px",
+              cursor: "pointer",
+              fontWeight: "bold"
+            }}
+          >
+            Submit Quiz
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ResultsPage({ quizId, results, token, onBack }) {
+  const [questions, setQuestions] = useState([]);
+
+  useEffect(() => {
+    fetchQuizDetails();
+  }, [quizId]);
+
+  const fetchQuizDetails = async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/quizzes/${quizId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setQuestions(res.data.questions);
+    } catch (err) {
+      console.error("Error fetching quiz details:", err);
+    }
+  };
+
+  const getCorrectOption = (questionId) => {
+    const question = questions.find(q => q.id === questionId);
+    if (!question) return null;
+    return question.options.find(o => o.is_correct);
+  };
+
+  return (
+    <div style={{
+      minHeight: "100vh",
+      background: "#f5f7fa",
+      padding: "20px",
+      fontFamily: "system-ui, -apple-system, sans-serif"
+    }}>
+      <div style={{ maxWidth: "800px", margin: "0 auto" }}>
+        <div style={{
+          background: results.passed ? "#c8e6c9" : "#ffcdd2",
+          padding: "30px",
+          borderRadius: "10px",
+          textAlign: "center",
+          marginBottom: "20px"
+        }}>
+          <h1 style={{
+            fontSize: "36px",
+            margin: "0 0 10px 0",
+            color: results.passed ? "#2e7d32" : "#c62828"
+          }}>
+            {results.passed ? "✓ Passed" : "✗ Failed"}
+          </h1>
+          <p style={{ fontSize: "24px", margin: "0", color: results.passed ? "#2e7d32" : "#c62828" }}>
+            Score: {results.score}%
+          </p>
+        </div>
+
+        <h2>Answer Review</h2>
+        {results.answer_review.map((review) => {
+          const correctOption = getCorrectOption(review.question_id);
+          const question = questions.find(q => q.id === review.question_id);
+          return (
+            <div key={review.question_id} style={{
+              background: "white",
+              padding: "20px",
+              borderRadius: "10px",
+              marginBottom: "15px",
+              borderLeft: `4px solid ${review.is_correct ? "#4caf50" : "#d32f2f"}`
+            }}>
+              <h3>{question?.text}</h3>
+              <p style={{ margin: "10px 0", color: review.is_correct ? "#4caf50" : "#d32f2f" }}>
+                {review.is_correct ? "✓ Correct" : "✗ Incorrect"}
+              </p>
+              {review.user_answer && (
+                <p><strong>Your answer:</strong> {question?.options.find(o => o.id === review.user_answer)?.text}</p>
+              )}
+              {!review.is_correct && correctOption && (
+                <p><strong>Correct answer:</strong> {correctOption.text}</p>
+              )}
+            </div>
+          );
+        })}
+
+        <button
+          onClick={onBack}
+          style={{
+            width: "100%",
+            padding: "15px",
+            background: "#667eea",
+            color: "white",
+            border: "none",
+            borderRadius: "5px",
+            cursor: "pointer",
+            fontWeight: "bold",
+            marginTop: "20px"
+          }}
+        >
+          Back to Dashboard
+        </button>
+      </div>
+    </div>
+  );
+}
