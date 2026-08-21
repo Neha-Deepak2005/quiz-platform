@@ -23,6 +23,13 @@ export default function App() {
   const [quizDesc, setQuizDesc] = useState("");
   const [quizDuration, setQuizDuration] = useState("30");
 
+  // Quiz edit state
+  const [selectedQuiz, setSelectedQuiz] = useState(null);
+  const [quizQuestions, setQuizQuestions] = useState([]);
+  const [questionText, setQuestionText] = useState("");
+  const [questionMarks, setQuestionMarks] = useState("1");
+  const [options, setOptions] = useState([{ text: "", isCorrect: false }]);
+
   // Student state
   const [studentQuizzes, setStudentQuizzes] = useState([]);
 
@@ -106,6 +113,19 @@ export default function App() {
     }
   };
 
+  const fetchQuizForEdit = async (quizId) => {
+    try {
+      const res = await axios.get(`${API_BASE}/quizzes/${quizId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setSelectedQuiz(res.data);
+      setQuizQuestions(res.data.questions || []);
+      setCurrentPage("quiz-edit");
+    } catch (err) {
+      alert("Error loading quiz");
+    }
+  };
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -171,6 +191,76 @@ export default function App() {
     }
   };
 
+  const handleAddQuestion = async (e) => {
+    e.preventDefault();
+    if (!selectedQuiz || !questionText.trim()) {
+      setMessage("Please enter a question");
+      return;
+    }
+
+    try {
+      const questionsPayload = {
+        question_text: questionText,
+        marks: parseFloat(questionMarks),
+        difficulty: "Medium",
+        options: options.map(opt => ({
+          text: opt.text,
+          is_correct: opt.isCorrect
+        }))
+      };
+
+      await axios.post(`${API_BASE}/admin/quizzes/${selectedQuiz.id}/add-question`, questionsPayload, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      setQuestionText("");
+      setQuestionMarks("1");
+      setOptions([{ text: "", isCorrect: false }]);
+      setMessage("Question added successfully!");
+
+      // Refresh quiz details
+      fetchQuizForEdit(selectedQuiz.id);
+    } catch (err) {
+      setMessage(err.response?.data?.detail || "Failed to add question");
+    }
+  };
+
+  const handlePublishQuiz = async () => {
+    if (!selectedQuiz) return;
+    if (quizQuestions.length === 0) {
+      setMessage("Quiz must have at least one question before publishing");
+      return;
+    }
+
+    try {
+      await axios.post(`${API_BASE}/admin/quizzes/${selectedQuiz.id}/publish`, {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setMessage("Quiz published successfully!");
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      setCurrentPage("admin-dashboard");
+      setSelectedQuiz(null);
+      setQuizQuestions([]);
+      fetchAdminQuizzes();
+    } catch (err) {
+      setMessage(err.response?.data?.detail || "Failed to publish quiz");
+    }
+  };
+
+  const handleDeleteQuiz = async (quizId) => {
+    if (!window.confirm("Are you sure you want to delete this quiz?")) return;
+
+    try {
+      await axios.delete(`${API_BASE}/admin/quizzes/${quizId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      fetchAdminQuizzes();
+      setMessage("Quiz deleted successfully!");
+    } catch (err) {
+      setMessage("Failed to delete quiz");
+    }
+  };
+
   const handleSubmitQuiz = async () => {
     if (!currentQuiz) return;
     setSubmitted(true);
@@ -210,6 +300,12 @@ export default function App() {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  const updateOption = (index, field, value) => {
+    const newOptions = [...options];
+    newOptions[index][field] = value;
+    setOptions(newOptions);
   };
 
   // Login Type Selection Page
@@ -258,8 +354,7 @@ export default function App() {
               borderRadius: "8px",
               background: "#667eea",
               color: "white",
-              cursor: "pointer",
-              transition: "background 0.3s"
+              cursor: "pointer"
             }}
             onMouseEnter={(e) => e.target.style.background = "#5568d3"}
             onMouseLeave={(e) => e.target.style.background = "#667eea"}
@@ -279,8 +374,7 @@ export default function App() {
               borderRadius: "8px",
               background: "#764ba2",
               color: "white",
-              cursor: "pointer",
-              transition: "background 0.3s"
+              cursor: "pointer"
             }}
             onMouseEnter={(e) => e.target.style.background = "#65408a"}
             onMouseLeave={(e) => e.target.style.background = "#764ba2"}
@@ -542,8 +636,8 @@ export default function App() {
             <h2>Create New Quiz</h2>
             {message && (
               <div style={{
-                background: "#d4edda",
-                color: "#155724",
+                background: message.includes("successfully") ? "#d4edda" : "#f8d7da",
+                color: message.includes("successfully") ? "#155724" : "#721c24",
                 padding: "12px",
                 borderRadius: "5px",
                 marginBottom: "20px"
@@ -648,26 +742,273 @@ export default function App() {
                   <h3>{quiz.title}</h3>
                   <p style={{ color: "#666" }}>{quiz.description}</p>
                   <p style={{ fontSize: "14px", color: "#999" }}>
-                    Duration: {quiz.duration} minutes | Status: {quiz.status}
+                    Duration: {quiz.duration} minutes | Status: <span style={{ fontWeight: "bold", color: quiz.status === "PUBLISHED" ? "#4caf50" : "#ff9800" }}>{quiz.status}</span>
                   </p>
-                  <button
-                    onClick={() => alert("Edit functionality coming soon")}
-                    style={{
-                      width: "100%",
-                      padding: "10px",
-                      background: "#667eea",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "5px",
-                      cursor: "pointer"
-                    }}
-                  >
-                    Edit Quiz
-                  </button>
+                  <div style={{ display: "flex", gap: "10px" }}>
+                    <button
+                      onClick={() => fetchQuizForEdit(quiz.id)}
+                      style={{
+                        flex: 1,
+                        padding: "10px",
+                        background: "#667eea",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "5px",
+                        cursor: "pointer",
+                        fontSize: "14px"
+                      }}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleDeleteQuiz(quiz.id)}
+                      style={{
+                        padding: "10px 15px",
+                        background: "#d32f2f",
+                        color: "white",
+                        border: "none",
+                        borderRadius: "5px",
+                        cursor: "pointer",
+                        fontSize: "14px"
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Quiz Edit Page
+  if (currentPage === "quiz-edit" && selectedQuiz && token) {
+    return (
+      <div style={{
+        minHeight: "100vh",
+        background: "#f5f7fa",
+        fontFamily: "system-ui, -apple-system, sans-serif"
+      }}>
+        <header style={{
+          background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+          color: "white",
+          padding: "20px 40px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center"
+        }}>
+          <h1>Edit Quiz: {selectedQuiz.title}</h1>
+          <button
+            onClick={() => {
+              setCurrentPage("admin-dashboard");
+              setSelectedQuiz(null);
+              setQuizQuestions([]);
+            }}
+            style={{
+              padding: "10px 20px",
+              background: "rgba(255,255,255,0.2)",
+              color: "white",
+              border: "none",
+              borderRadius: "5px",
+              cursor: "pointer"
+            }}
+          >
+            Back
+          </button>
+        </header>
+
+        <div style={{ padding: "40px", maxWidth: "1200px", margin: "0 auto" }}>
+          {message && (
+            <div style={{
+              background: message.includes("successfully") ? "#d4edda" : "#f8d7da",
+              color: message.includes("successfully") ? "#155724" : "#721c24",
+              padding: "12px",
+              borderRadius: "5px",
+              marginBottom: "20px"
+            }}>
+              {message}
+            </div>
+          )}
+
+          <div style={{
+            background: "white",
+            padding: "30px",
+            borderRadius: "10px",
+            marginBottom: "30px",
+            boxShadow: "0 2px 10px rgba(0,0,0,0.1)"
+          }}>
+            <h2>Add Question</h2>
+            <form onSubmit={handleAddQuestion}>
+              <div style={{ marginBottom: "20px" }}>
+                <label style={{ display: "block", marginBottom: "8px", fontWeight: "600" }}>Question</label>
+                <textarea
+                  value={questionText}
+                  onChange={(e) => setQuestionText(e.target.value)}
+                  rows="3"
+                  required
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    border: "1px solid #ddd",
+                    borderRadius: "5px",
+                    boxSizing: "border-box"
+                  }}
+                />
+              </div>
+
+              <div style={{ marginBottom: "20px" }}>
+                <label style={{ display: "block", marginBottom: "8px", fontWeight: "600" }}>Marks</label>
+                <input
+                  type="number"
+                  value={questionMarks}
+                  onChange={(e) => setQuestionMarks(e.target.value)}
+                  min="0.5"
+                  step="0.5"
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    border: "1px solid #ddd",
+                    borderRadius: "5px",
+                    boxSizing: "border-box"
+                  }}
+                />
+              </div>
+
+              <h3>Options</h3>
+              {options.map((option, idx) => (
+                <div key={idx} style={{ marginBottom: "15px", padding: "15px", background: "#f9f9f9", borderRadius: "5px" }}>
+                  <div style={{ marginBottom: "10px" }}>
+                    <input
+                      type="text"
+                      placeholder="Option text"
+                      value={option.text}
+                      onChange={(e) => updateOption(idx, 'text', e.target.value)}
+                      required
+                      style={{
+                        width: "100%",
+                        padding: "10px",
+                        border: "1px solid #ddd",
+                        borderRadius: "5px",
+                        boxSizing: "border-box"
+                      }}
+                    />
+                  </div>
+                  <label style={{ display: "flex", alignItems: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={option.isCorrect}
+                      onChange={(e) => updateOption(idx, 'isCorrect', e.target.checked)}
+                      style={{ marginRight: "10px", width: "18px", height: "18px", cursor: "pointer" }}
+                    />
+                    <span>Mark as correct answer</span>
+                  </label>
+                </div>
+              ))}
+
+              <button
+                type="button"
+                onClick={() => setOptions([...options, { text: "", isCorrect: false }])}
+                style={{
+                  marginBottom: "20px",
+                  padding: "10px 20px",
+                  background: "#f0f0f0",
+                  border: "1px solid #ddd",
+                  borderRadius: "5px",
+                  cursor: "pointer"
+                }}
+              >
+                + Add Option
+              </button>
+
+              <button
+                type="submit"
+                style={{
+                  width: "100%",
+                  padding: "12px",
+                  background: "#4caf50",
+                  color: "white",
+                  border: "none",
+                  borderRadius: "5px",
+                  cursor: "pointer",
+                  fontWeight: "600"
+                }}
+              >
+                Add Question
+              </button>
+            </form>
+          </div>
+
+          <div style={{
+            background: "white",
+            padding: "30px",
+            borderRadius: "10px",
+            marginBottom: "30px",
+            boxShadow: "0 2px 10px rgba(0,0,0,0.1)"
+          }}>
+            <h2>Questions ({quizQuestions.length})</h2>
+            {quizQuestions.length === 0 ? (
+              <p style={{ color: "#999" }}>No questions added yet. Add one above!</p>
+            ) : (
+              quizQuestions.map((q, idx) => (
+                <div key={q.id} style={{
+                  padding: "15px",
+                  marginBottom: "15px",
+                  background: "#f9f9f9",
+                  borderRadius: "5px",
+                  borderLeft: "4px solid #667eea"
+                }}>
+                  <h4>{idx + 1}. {q.question_text}</h4>
+                  <p style={{ fontSize: "12px", color: "#999", marginBottom: "10px" }}>Marks: {q.marks}</p>
+                  {q.options.map((opt) => (
+                    <div key={opt.id} style={{
+                      padding: "8px",
+                      marginBottom: "8px",
+                      background: opt.is_correct ? "#e8f5e9" : "white",
+                      border: `1px solid ${opt.is_correct ? "#4caf50" : "#ddd"}`,
+                      borderRadius: "4px"
+                    }}>
+                      {opt.option_text} {opt.is_correct && <span style={{ color: "#4caf50", fontWeight: "bold" }}>✓ Correct</span>}
+                    </div>
+                  ))}
+                </div>
+              ))
+            )}
+          </div>
+
+          {quizQuestions.length > 0 && selectedQuiz.status !== "PUBLISHED" && (
+            <button
+              onClick={handlePublishQuiz}
+              style={{
+                width: "100%",
+                padding: "15px",
+                background: "#ff9800",
+                color: "white",
+                border: "none",
+                borderRadius: "5px",
+                cursor: "pointer",
+                fontWeight: "600",
+                fontSize: "16px"
+              }}
+            >
+              📤 Publish Quiz
+            </button>
+          )}
+
+          {selectedQuiz.status === "PUBLISHED" && (
+            <div style={{
+              padding: "20px",
+              background: "#d4edda",
+              color: "#155724",
+              borderRadius: "5px",
+              textAlign: "center",
+              fontWeight: "600"
+            }}>
+              ✓ Quiz Published - Students can now take this quiz
+            </div>
+          )}
         </div>
       </div>
     );
@@ -712,40 +1053,44 @@ export default function App() {
             gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
             gap: "20px"
           }}>
-            {studentQuizzes.map((quiz) => (
-              <div key={quiz.id} style={{
-                background: "white",
-                padding: "20px",
-                borderRadius: "10px",
-                boxShadow: "0 2px 10px rgba(0,0,0,0.1)"
-              }}>
-                <h3>{quiz.title}</h3>
-                <p style={{ color: "#666" }}>{quiz.description}</p>
-                <p style={{ fontSize: "14px", color: "#999" }}>
-                  Duration: {quiz.duration} minutes
-                </p>
-                <button
-                  onClick={() => {
-                    setCurrentQuestion(0);
-                    setAnswers({});
-                    setTimeLeft(null);
-                    setSubmitted(false);
-                    fetchQuizDetails(quiz.id);
-                  }}
-                  style={{
-                    width: "100%",
-                    padding: "10px",
-                    background: "#667eea",
-                    color: "white",
-                    border: "none",
-                    borderRadius: "5px",
-                    cursor: "pointer"
-                  }}
-                >
-                  Start Quiz
-                </button>
-              </div>
-            ))}
+            {studentQuizzes.length === 0 ? (
+              <p style={{ color: "#999" }}>No quizzes available yet.</p>
+            ) : (
+              studentQuizzes.map((quiz) => (
+                <div key={quiz.id} style={{
+                  background: "white",
+                  padding: "20px",
+                  borderRadius: "10px",
+                  boxShadow: "0 2px 10px rgba(0,0,0,0.1)"
+                }}>
+                  <h3>{quiz.title}</h3>
+                  <p style={{ color: "#666" }}>{quiz.description}</p>
+                  <p style={{ fontSize: "14px", color: "#999" }}>
+                    Duration: {quiz.duration} minutes
+                  </p>
+                  <button
+                    onClick={() => {
+                      setCurrentQuestion(0);
+                      setAnswers({});
+                      setTimeLeft(null);
+                      setSubmitted(false);
+                      fetchQuizDetails(quiz.id);
+                    }}
+                    style={{
+                      width: "100%",
+                      padding: "10px",
+                      background: "#667eea",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "5px",
+                      cursor: "pointer"
+                    }}
+                  >
+                    Start Quiz
+                  </button>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>
