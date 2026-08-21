@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session, relationship, sessionmaker
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 import jwt
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 
 # Database setup
 DATABASE_URL = "sqlite:///./quiz.db"
@@ -474,6 +476,11 @@ def seed_data():
         db.commit()
 
     db.close()
+
+# Serve React frontend
+frontend_path = Path(__file__).parent.parent / "frontend" / "build"
+if frontend_path.exists():
+    app.mount("/", StaticFiles(directory=frontend_path, html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn
