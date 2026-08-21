@@ -1,13 +1,13 @@
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, ForeignKey, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import Session, relationship, sessionmaker
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 import jwt
-from fastapi.staticfiles import StaticFiles
-from pathlib import Path
+import os
 
 # Database setup
 DATABASE_URL = "sqlite:///./quiz.db"
@@ -83,7 +83,6 @@ Base.metadata.create_all(bind=engine)
 class UserLogin(BaseModel):
     email: str
     password: str
-    role: str = "STUDENT"
 
 class QuizResponse(BaseModel):
     id: int
@@ -102,24 +101,6 @@ class AttemptResponse(BaseModel):
     status: str
     completed_at: datetime
 
-class OptionCreate(BaseModel):
-    option_text: str
-    is_correct: bool
-
-class QuestionCreate(BaseModel):
-    question_text: str
-    difficulty: str
-    marks: float
-    options: list
-
-class QuizCreate(BaseModel):
-    title: str
-    description: str
-    difficulty: str
-    duration: int
-    passing_score: float = 60.0
-    questions: list = []
-
 # FastAPI app
 app = FastAPI(title="Quiz Platform")
 
@@ -132,7 +113,6 @@ app.add_middleware(
 )
 
 SECRET_KEY = "secret-key-change-in-production"
-current_user_id = 1  # Simulated current user
 
 def get_db():
     db = SessionLocal()
@@ -141,25 +121,25 @@ def get_db():
     finally:
         db.close()
 
-def create_token(user_id: int, role: str):
-    payload = {"sub": str(user_id), "role": role, "exp": datetime.utcnow() + timedelta(hours=24)}
+def create_token(user_id: int):
+    payload = {"sub": str(user_id), "exp": datetime.utcnow() + timedelta(hours=24)}
     return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
 def verify_token(token: str):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
-        return int(payload["sub"]), payload.get("role", "STUDENT")
+        return int(payload["sub"])
     except:
-        return None, None
+        return None
 
 # Routes
 @app.post("/api/auth/login")
 def login(credentials: UserLogin, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == credentials.email, User.role == credentials.role).first()
+    user = db.query(User).filter(User.email == credentials.email).first()
     if not user or user.password != credentials.password:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    token = create_token(user.id, user.role)
+    token = create_token(user.id)
     return {"access_token": token, "token_type": "bearer", "user_id": user.id, "role": user.role}
 
 @app.post("/api/auth/register")
@@ -168,103 +148,14 @@ def register(credentials: UserLogin, db: Session = Depends(get_db)):
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    role = credentials.role if credentials.role in ["ADMIN", "STUDENT"] else "STUDENT"
-    user = User(email=credentials.email, password=credentials.password, role=role, name=credentials.email.split("@")[0])
+    user = User(email=credentials.email, password=credentials.password, name=credentials.email.split("@")[0])
     db.add(user)
     db.commit()
     db.refresh(user)
 
-    token = create_token(user.id, user.role)
-    return {"access_token": token, "token_type": "bearer", "user_id": user.id, "role": user.role}
+    token = create_token(user.id)
+    return {"access_token": token, "token_type": "bearer", "user_id": user.id}
 
-# ADMIN ENDPOINTS
-@app.get("/api/admin/quizzes")
-def get_all_quizzes(db: Session = Depends(get_db)):
-    quizzes = db.query(Quiz).all()
-    return [
-        {
-            "id": q.id,
-            "title": q.title,
-            "description": q.description,
-            "difficulty": q.difficulty,
-            "duration": q.duration,
-            "passing_score": q.passing_score,
-            "status": q.status
-        }
-        for q in quizzes
-    ]
-
-@app.post("/api/admin/quizzes")
-def create_quiz(quiz: QuizCreate, db: Session = Depends(get_db)):
-    cat = db.query(Category).first()
-    if not cat:
-        cat = Category(name="General", description="General category")
-        db.add(cat)
-        db.commit()
-
-    new_quiz = Quiz(
-        title=quiz.title,
-        description=quiz.description,
-        category_id=cat.id,
-        difficulty=quiz.difficulty,
-        duration=quiz.duration,
-        passing_score=quiz.passing_score,
-        status="DRAFT"
-    )
-    db.add(new_quiz)
-    db.commit()
-    db.refresh(new_quiz)
-
-    return {"id": new_quiz.id, "title": new_quiz.title, "status": new_quiz.status}
-
-@app.post("/api/admin/quizzes/{quiz_id}/publish")
-def publish_quiz(quiz_id: int, db: Session = Depends(get_db)):
-    quiz = db.query(Quiz).filter(Quiz.id == quiz_id).first()
-    if not quiz:
-        raise HTTPException(status_code=404, detail="Quiz not found")
-
-    quiz.status = "PUBLISHED"
-    db.commit()
-    return {"id": quiz.id, "status": quiz.status}
-
-@app.post("/api/admin/quizzes/{quiz_id}/add-question")
-def add_question(quiz_id: int, data: dict, db: Session = Depends(get_db)):
-    quiz = db.query(Quiz).filter(Quiz.id == quiz_id).first()
-    if not quiz:
-        raise HTTPException(status_code=404, detail="Quiz not found")
-
-    question = Question(
-        quiz_id=quiz_id,
-        question_text=data.get("question_text"),
-        difficulty=data.get("difficulty", "Easy"),
-        marks=data.get("marks", 1.0)
-    )
-    db.add(question)
-    db.commit()
-    db.refresh(question)
-
-    for opt in data.get("options", []):
-        option = Option(
-            question_id=question.id,
-            option_text=opt.get("option_text"),
-            is_correct=opt.get("is_correct", False)
-        )
-        db.add(option)
-    db.commit()
-
-    return {"id": question.id, "quiz_id": quiz_id}
-
-@app.delete("/api/admin/quizzes/{quiz_id}")
-def delete_quiz(quiz_id: int, db: Session = Depends(get_db)):
-    quiz = db.query(Quiz).filter(Quiz.id == quiz_id).first()
-    if not quiz:
-        raise HTTPException(status_code=404, detail="Quiz not found")
-
-    db.delete(quiz)
-    db.commit()
-    return {"message": "Quiz deleted"}
-
-# STUDENT ENDPOINTS
 @app.get("/api/quizzes/published")
 def get_published_quizzes(db: Session = Depends(get_db)):
     quizzes = db.query(Quiz).filter(Quiz.status == "PUBLISHED").all()
@@ -320,7 +211,7 @@ def start_quiz(quiz_id: int, db: Session = Depends(get_db)):
     if not quiz:
         raise HTTPException(status_code=404, detail="Quiz not found")
 
-    attempt = Attempt(user_id=current_user_id, quiz_id=quiz_id)
+    attempt = Attempt(user_id=1, quiz_id=quiz_id)
     db.add(attempt)
     db.commit()
     db.refresh(attempt)
@@ -329,7 +220,7 @@ def start_quiz(quiz_id: int, db: Session = Depends(get_db)):
 
 @app.post("/api/quizzes/{quiz_id}/submit")
 def submit_quiz(quiz_id: int, data: dict, db: Session = Depends(get_db)):
-    attempt = db.query(Attempt).filter(Attempt.quiz_id == quiz_id, Attempt.user_id == current_user_id).order_by(Attempt.id.desc()).first()
+    attempt = db.query(Attempt).filter(Attempt.quiz_id == quiz_id, Attempt.user_id == 1).first()
     if not attempt:
         raise HTTPException(status_code=404, detail="Attempt not found")
 
@@ -361,33 +252,12 @@ def submit_quiz(quiz_id: int, data: dict, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(attempt)
 
-    # Get quiz details and answers for review
-    quiz = db.query(Quiz).filter(Quiz.id == quiz_id).first()
-    questions = db.query(Question).filter(Question.quiz_id == quiz_id).all()
-
-    review = []
-    for q in questions:
-        options = db.query(Option).filter(Option.question_id == q.id).all()
-        user_answer = db.query(Answer).filter(Answer.attempt_id == attempt.id, Answer.question_id == q.id).first()
-        correct_option = next((o for o in options if o.is_correct), None)
-
-        review.append({
-            "question_id": q.id,
-            "question_text": q.question_text,
-            "user_answer_id": user_answer.selected_option_id if user_answer else None,
-            "correct_answer_id": correct_option.id if correct_option else None,
-            "is_correct": user_answer.is_correct if user_answer else False,
-            "options": [{"id": o.id, "text": o.option_text, "is_correct": o.is_correct} for o in options]
-        })
-
     return {
         "id": attempt.id,
         "score": attempt.score,
         "percentage": attempt.percentage,
         "status": attempt.status,
-        "completed_at": attempt.completed_at,
-        "quiz_title": quiz.title,
-        "review": review
+        "completed_at": attempt.completed_at
     }
 
 @app.get("/api/attempts/{attempt_id}")
@@ -396,34 +266,111 @@ def get_attempt(attempt_id: int, db: Session = Depends(get_db)):
     if not attempt:
         raise HTTPException(status_code=404, detail="Attempt not found")
 
-    quiz = db.query(Quiz).filter(Quiz.id == attempt.quiz_id).first()
-    questions = db.query(Question).filter(Question.quiz_id == attempt.quiz_id).all()
-
-    review = []
-    for q in questions:
-        options = db.query(Option).filter(Option.question_id == q.id).all()
-        user_answer = db.query(Answer).filter(Answer.attempt_id == attempt.id, Answer.question_id == q.id).first()
-        correct_option = next((o for o in options if o.is_correct), None)
-
-        review.append({
-            "question_id": q.id,
-            "question_text": q.question_text,
-            "user_answer_id": user_answer.selected_option_id if user_answer else None,
-            "correct_answer_id": correct_option.id if correct_option else None,
-            "is_correct": user_answer.is_correct if user_answer else False,
-            "options": [{"id": o.id, "text": o.option_text, "is_correct": o.is_correct} for o in options]
-        })
-
     return {
         "id": attempt.id,
         "quiz_id": attempt.quiz_id,
         "score": attempt.score,
         "percentage": attempt.percentage,
         "status": attempt.status,
-        "completed_at": attempt.completed_at,
-        "quiz_title": quiz.title,
-        "review": review
+        "completed_at": attempt.completed_at
     }
+
+@app.post("/api/admin/quizzes")
+def create_quiz(data: dict, db: Session = Depends(get_db)):
+    category = db.query(Category).first()
+    if not category:
+        category = Category(name="General", description="General category")
+        db.add(category)
+        db.commit()
+
+    quiz = Quiz(
+        title=data.get("title"),
+        description=data.get("description"),
+        category_id=category.id,
+        difficulty=data.get("difficulty", "Easy"),
+        duration=data.get("duration", 30),
+        passing_score=data.get("passing_score", 60.0)
+    )
+    db.add(quiz)
+    db.commit()
+    db.refresh(quiz)
+    return {"id": quiz.id, "title": quiz.title}
+
+@app.get("/api/admin/quizzes")
+def get_admin_quizzes(db: Session = Depends(get_db)):
+    quizzes = db.query(Quiz).all()
+    return [
+        {
+            "id": q.id,
+            "title": q.title,
+            "description": q.description,
+            "difficulty": q.difficulty,
+            "duration": q.duration,
+            "passing_score": q.passing_score,
+            "status": q.status
+        }
+        for q in quizzes
+    ]
+
+@app.post("/api/admin/quizzes/{quiz_id}/add-question")
+def add_question(quiz_id: int, data: dict, db: Session = Depends(get_db)):
+    quiz = db.query(Quiz).filter(Quiz.id == quiz_id).first()
+    if not quiz:
+        raise HTTPException(status_code=404, detail="Quiz not found")
+
+    question = Question(
+        quiz_id=quiz_id,
+        question_text=data.get("question_text"),
+        marks=data.get("marks", 1.0),
+        difficulty=data.get("difficulty", "Easy")
+    )
+    db.add(question)
+    db.commit()
+    db.refresh(question)
+
+    options = data.get("options", [])
+    for option_text in options:
+        option = Option(
+            question_id=question.id,
+            option_text=option_text.get("text"),
+            is_correct=option_text.get("is_correct", False)
+        )
+        db.add(option)
+
+    db.commit()
+    return {"id": question.id, "question_text": question.question_text}
+
+@app.post("/api/admin/quizzes/{quiz_id}/publish")
+def publish_quiz(quiz_id: int, db: Session = Depends(get_db)):
+    quiz = db.query(Quiz).filter(Quiz.id == quiz_id).first()
+    if not quiz:
+        raise HTTPException(status_code=404, detail="Quiz not found")
+
+    questions = db.query(Question).filter(Question.quiz_id == quiz_id).all()
+    if not questions:
+        raise HTTPException(status_code=400, detail="Cannot publish quiz without questions")
+
+    quiz.status = "PUBLISHED"
+    db.commit()
+    return {"id": quiz.id, "status": quiz.status}
+
+@app.delete("/api/admin/quizzes/{quiz_id}")
+def delete_quiz(quiz_id: int, db: Session = Depends(get_db)):
+    quiz = db.query(Quiz).filter(Quiz.id == quiz_id).first()
+    if not quiz:
+        raise HTTPException(status_code=404, detail="Quiz not found")
+
+    db.query(Answer).filter(Answer.question_id.in_(
+        db.query(Question.id).filter(Question.quiz_id == quiz_id)
+    )).delete()
+    db.query(Option).filter(Option.question_id.in_(
+        db.query(Question.id).filter(Question.quiz_id == quiz_id)
+    )).delete()
+    db.query(Question).filter(Question.quiz_id == quiz_id).delete()
+    db.query(Attempt).filter(Attempt.quiz_id == quiz_id).delete()
+    db.delete(quiz)
+    db.commit()
+    return {"message": "Quiz deleted"}
 
 # Seed data
 @app.on_event("startup")
@@ -463,25 +410,28 @@ def seed_data():
         db.add_all([q1, q2])
         db.commit()
 
-        # Add options
-        opts = [
+        # Add options - using db.add_all for all options
+        options_list = [
             Option(question_id=q1.id, option_text="London", is_correct=False),
             Option(question_id=q1.id, option_text="Paris", is_correct=True),
             Option(question_id=q1.id, option_text="Berlin", is_correct=False),
             Option(question_id=q2.id, option_text="3", is_correct=False),
             Option(question_id=q2.id, option_text="4", is_correct=True),
-            Option(question_id=q2.id, option_text="5", is_correct=False)
+            Option(question_id=q2.id, option_text="5", is_correct=False),
         ]
-        db.add_all(opts)
+        db.add_all(options_list)
         db.commit()
 
     db.close()
 
-# Serve React frontend
-frontend_path = Path(__file__).parent.parent / "frontend" / "build"
-if frontend_path.exists():
-    app.mount("/", StaticFiles(directory=frontend_path, html=True), name="static")
+# Mount static files for frontend
+# Check if build directory exists, if not create a fallback
+if os.path.exists("../frontend/build"):
+    app.mount("/", StaticFiles(directory="../frontend/build", html=True), name="static")
+elif os.path.exists("./frontend/build"):
+    app.mount("/", StaticFiles(directory="./frontend/build", html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
