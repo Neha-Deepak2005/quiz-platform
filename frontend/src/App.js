@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
 const API_BASE = "/api";
@@ -7,11 +7,212 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState("login-type");
   const [token, setToken] = useState(localStorage.getItem("token"));
   const [role, setRole] = useState(localStorage.getItem("role"));
-  const [user, setUser] = useState(null);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Login Type Selection
+  // Login form state
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isRegister, setIsRegister] = useState(false);
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [registerRole, setRegisterRole] = useState("STUDENT");
+
+  // Admin state
+  const [adminQuizzes, setAdminQuizzes] = useState([]);
+  const [quizTitle, setQuizTitle] = useState("");
+  const [quizDesc, setQuizDesc] = useState("");
+  const [quizDuration, setQuizDuration] = useState("30");
+
+  // Student state
+  const [studentQuizzes, setStudentQuizzes] = useState([]);
+
+  // Quiz taking state
+  const [currentQuiz, setCurrentQuiz] = useState(null);
+  const [currentQuestion, setCurrentQuestion] = useState(0);
+  const [answers, setAnswers] = useState({});
+  const [timeLeft, setTimeLeft] = useState(null);
+  const [submitted, setSubmitted] = useState(false);
+  const [quizResults, setQuizResults] = useState(null);
+
+  // Fetch quizzes when admin dashboard loads
+  useEffect(() => {
+    if (currentPage === "admin-dashboard" && token) {
+      fetchAdminQuizzes();
+    }
+  }, [currentPage, token]);
+
+  // Fetch quizzes when student dashboard loads
+  useEffect(() => {
+    if (currentPage === "student-dashboard" && token) {
+      fetchStudentQuizzes();
+    }
+  }, [currentPage, token]);
+
+  // Quiz timer
+  useEffect(() => {
+    if (!currentQuiz || submitted || currentPage !== "quiz-taking") return;
+    if (timeLeft === null && currentQuiz) {
+      setTimeLeft(currentQuiz.duration_minutes * 60);
+      return;
+    }
+    if (timeLeft <= 0) {
+      handleSubmitQuiz();
+      return;
+    }
+    const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [timeLeft, currentQuiz, submitted, currentPage]);
+
+  // Fetch quiz details when starting a quiz
+  useEffect(() => {
+    if (currentPage.startsWith("quiz-") && currentPage !== "quiz-taking" && !currentQuiz) {
+      const quizId = parseInt(currentPage.split("-")[1]);
+      fetchQuizDetails(quizId);
+    }
+  }, [currentPage, currentQuiz]);
+
+  const fetchAdminQuizzes = async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/quizzes`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setAdminQuizzes(res.data);
+    } catch (err) {
+      console.error("Error fetching admin quizzes:", err);
+    }
+  };
+
+  const fetchStudentQuizzes = async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/quizzes`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setStudentQuizzes(res.data);
+    } catch (err) {
+      console.error("Error fetching student quizzes:", err);
+    }
+  };
+
+  const fetchQuizDetails = async (quizId) => {
+    try {
+      const res = await axios.get(`${API_BASE}/quizzes/${quizId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setCurrentQuiz(res.data);
+      setCurrentPage("quiz-taking");
+    } catch (err) {
+      alert("Error loading quiz");
+      setCurrentPage("student-dashboard");
+    }
+  };
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const res = await axios.post(`${API_BASE}/auth/login`, {
+        email,
+        password
+      });
+      localStorage.setItem("token", res.data.access_token);
+      localStorage.setItem("role", res.data.role);
+      setToken(res.data.access_token);
+      setRole(res.data.role);
+      setEmail("");
+      setPassword("");
+      setCurrentPage(res.data.role === "ADMIN" ? "admin-dashboard" : "student-dashboard");
+    } catch (err) {
+      setMessage(err.response?.data?.detail || "Login failed");
+    }
+    setLoading(false);
+  };
+
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    if (password !== confirmPassword) {
+      setMessage("Passwords do not match");
+      return;
+    }
+    setLoading(true);
+    try {
+      await axios.post(`${API_BASE}/auth/register`, {
+        email,
+        password,
+        role: registerRole
+      });
+      setMessage("Registration successful! Please login.");
+      setIsRegister(false);
+      setEmail("");
+      setPassword("");
+      setConfirmPassword("");
+    } catch (err) {
+      setMessage(err.response?.data?.detail || "Registration failed");
+    }
+    setLoading(false);
+  };
+
+  const handleCreateQuiz = async (e) => {
+    e.preventDefault();
+    try {
+      await axios.post(`${API_BASE}/quizzes`, {
+        title: quizTitle,
+        description: quizDesc,
+        duration_minutes: parseInt(quizDuration)
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setQuizTitle("");
+      setQuizDesc("");
+      setQuizDuration("30");
+      fetchAdminQuizzes();
+      setMessage("Quiz created successfully!");
+    } catch (err) {
+      setMessage(err.response?.data?.detail || "Failed to create quiz");
+    }
+  };
+
+  const handleSubmitQuiz = async () => {
+    if (!currentQuiz) return;
+    setSubmitted(true);
+    try {
+      const res = await axios.post(`${API_BASE}/quizzes/${currentQuiz.id}/submit`, {
+        answers: answers
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setQuizResults(res.data);
+      setCurrentPage("results");
+    } catch (err) {
+      alert("Error submitting quiz");
+      setCurrentPage("student-dashboard");
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    localStorage.removeItem("role");
+    setToken(null);
+    setRole(null);
+    setCurrentPage("login-type");
+    setEmail("");
+    setPassword("");
+    setMessage("");
+    setAdminQuizzes([]);
+    setStudentQuizzes([]);
+    setCurrentQuiz(null);
+    setAnswers({});
+    setTimeLeft(null);
+    setSubmitted(false);
+    setQuizResults(null);
+  };
+
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  // Login Type Selection Page
   if (currentPage === "login-type") {
     return (
       <div style={{
@@ -102,56 +303,6 @@ export default function App() {
 
   // Login/Register Page
   if (currentPage === "login") {
-    const [email, setEmail] = useState("");
-    const [password, setPassword] = useState("");
-    const [isRegister, setIsRegister] = useState(false);
-    const [confirmPassword, setConfirmPassword] = useState("");
-    const [registerRole, setRegisterRole] = useState("STUDENT");
-
-    const handleLogin = async (e) => {
-      e.preventDefault();
-      setLoading(true);
-      try {
-        const res = await axios.post(`${API_BASE}/auth/login`, {
-          email,
-          password
-        });
-        localStorage.setItem("token", res.data.access_token);
-        localStorage.setItem("role", res.data.role);
-        setToken(res.data.access_token);
-        setRole(res.data.role);
-        setUser(res.data.user);
-        setCurrentPage(res.data.role === "ADMIN" ? "admin-dashboard" : "student-dashboard");
-      } catch (err) {
-        setMessage(err.response?.data?.detail || "Login failed");
-      }
-      setLoading(false);
-    };
-
-    const handleRegister = async (e) => {
-      e.preventDefault();
-      if (password !== confirmPassword) {
-        setMessage("Passwords do not match");
-        return;
-      }
-      setLoading(true);
-      try {
-        await axios.post(`${API_BASE}/auth/register`, {
-          email,
-          password,
-          role: registerRole
-        });
-        setMessage("Registration successful! Please login.");
-        setIsRegister(false);
-        setEmail("");
-        setPassword("");
-        setConfirmPassword("");
-      } catch (err) {
-        setMessage(err.response?.data?.detail || "Registration failed");
-      }
-      setLoading(false);
-    };
-
     return (
       <div style={{
         minHeight: "100vh",
@@ -307,10 +458,7 @@ export default function App() {
             </button>
           </form>
 
-          <div style={{
-            marginTop: "20px",
-            textAlign: "center"
-          }}>
+          <div style={{ marginTop: "20px", textAlign: "center" }}>
             <button
               onClick={() => {
                 setIsRegister(!isRegister);
@@ -329,10 +477,7 @@ export default function App() {
             </button>
           </div>
 
-          <div style={{
-            marginTop: "20px",
-            textAlign: "center"
-          }}>
+          <div style={{ marginTop: "20px", textAlign: "center" }}>
             <button
               onClick={() => {
                 setCurrentPage("login-type");
@@ -356,45 +501,6 @@ export default function App() {
 
   // Admin Dashboard
   if (currentPage === "admin-dashboard" && token) {
-    const [quizzes, setQuizzes] = useState([]);
-    const [quizTitle, setQuizTitle] = useState("");
-    const [quizDesc, setQuizDesc] = useState("");
-    const [quizDuration, setQuizDuration] = useState("30");
-
-    useEffect(() => {
-      fetchQuizzes();
-    }, []);
-
-    const fetchQuizzes = async () => {
-      try {
-        const res = await axios.get(`${API_BASE}/quizzes`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        setQuizzes(res.data);
-      } catch (err) {
-        console.error("Error fetching quizzes:", err);
-      }
-    };
-
-    const handleCreateQuiz = async (e) => {
-      e.preventDefault();
-      try {
-        await axios.post(`${API_BASE}/quizzes`, {
-          title: quizTitle,
-          description: quizDesc,
-          duration_minutes: parseInt(quizDuration)
-        }, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        setQuizTitle("");
-        setQuizDesc("");
-        setQuizDuration("30");
-        fetchQuizzes();
-      } catch (err) {
-        alert(err.response?.data?.detail || "Failed to create quiz");
-      }
-    };
-
     return (
       <div style={{
         minHeight: "100vh",
@@ -411,12 +517,7 @@ export default function App() {
         }}>
           <h1>Admin Dashboard</h1>
           <button
-            onClick={() => {
-              localStorage.removeItem("token");
-              localStorage.removeItem("role");
-              setToken(null);
-              setCurrentPage("login-type");
-            }}
+            onClick={handleLogout}
             style={{
               padding: "10px 20px",
               background: "rgba(255,255,255,0.2)",
@@ -439,6 +540,17 @@ export default function App() {
             boxShadow: "0 2px 10px rgba(0,0,0,0.1)"
           }}>
             <h2>Create New Quiz</h2>
+            {message && (
+              <div style={{
+                background: "#d4edda",
+                color: "#155724",
+                padding: "12px",
+                borderRadius: "5px",
+                marginBottom: "20px"
+              }}>
+                {message}
+              </div>
+            )}
             <form onSubmit={handleCreateQuiz}>
               <div style={{ marginBottom: "20px" }}>
                 <label style={{
@@ -526,7 +638,7 @@ export default function App() {
               gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
               gap: "20px"
             }}>
-              {quizzes.map((quiz) => (
+              {adminQuizzes.map((quiz) => (
                 <div key={quiz.id} style={{
                   background: "white",
                   padding: "20px",
@@ -539,7 +651,7 @@ export default function App() {
                     Duration: {quiz.duration_minutes} minutes
                   </p>
                   <button
-                    onClick={() => setCurrentPage(`quiz-edit-${quiz.id}`)}
+                    onClick={() => alert("Edit functionality coming soon")}
                     style={{
                       width: "100%",
                       padding: "10px",
@@ -563,23 +675,6 @@ export default function App() {
 
   // Student Dashboard
   if (currentPage === "student-dashboard" && token) {
-    const [quizzes, setQuizzes] = useState([]);
-
-    useEffect(() => {
-      fetchAvailableQuizzes();
-    }, []);
-
-    const fetchAvailableQuizzes = async () => {
-      try {
-        const res = await axios.get(`${API_BASE}/quizzes`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        setQuizzes(res.data);
-      } catch (err) {
-        console.error("Error fetching quizzes:", err);
-      }
-    };
-
     return (
       <div style={{
         minHeight: "100vh",
@@ -596,12 +691,7 @@ export default function App() {
         }}>
           <h1>Student Dashboard</h1>
           <button
-            onClick={() => {
-              localStorage.removeItem("token");
-              localStorage.removeItem("role");
-              setToken(null);
-              setCurrentPage("login-type");
-            }}
+            onClick={handleLogout}
             style={{
               padding: "10px 20px",
               background: "rgba(255,255,255,0.2)",
@@ -622,7 +712,7 @@ export default function App() {
             gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
             gap: "20px"
           }}>
-            {quizzes.map((quiz) => (
+            {studentQuizzes.map((quiz) => (
               <div key={quiz.id} style={{
                 background: "white",
                 padding: "20px",
@@ -635,7 +725,13 @@ export default function App() {
                   Duration: {quiz.duration_minutes} minutes
                 </p>
                 <button
-                  onClick={() => setCurrentPage(`quiz-${quiz.id}`)}
+                  onClick={() => {
+                    setCurrentQuestion(0);
+                    setAnswers({});
+                    setTimeLeft(null);
+                    setSubmitted(false);
+                    fetchQuizDetails(quiz.id);
+                  }}
                   style={{
                     width: "100%",
                     padding: "10px",
@@ -656,20 +752,223 @@ export default function App() {
     );
   }
 
-  // Quiz Page
-  if (currentPage.startsWith("quiz-") && currentPage !== "quiz-edit" && token) {
-    const quizId = parseInt(currentPage.split("-")[1]);
-    return <QuizPage quizId={quizId} token={token} onComplete={(results) => {
-      setCurrentPage(`results-${quizId}`);
-      window.quizResults = results;
-    }} />;
+  // Quiz Taking Page
+  if (currentPage === "quiz-taking" && currentQuiz && token) {
+    return (
+      <div style={{
+        minHeight: "100vh",
+        background: "#f5f7fa",
+        padding: "20px",
+        fontFamily: "system-ui, -apple-system, sans-serif"
+      }}>
+        <div style={{ maxWidth: "800px", margin: "0 auto" }}>
+          <div style={{
+            background: "white",
+            padding: "20px",
+            borderRadius: "10px",
+            marginBottom: "20px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center"
+          }}>
+            <h2>{currentQuiz.title}</h2>
+            <div style={{ fontSize: "20px", fontWeight: "bold", color: timeLeft < 60 ? "#d32f2f" : "#667eea" }}>
+              {formatTime(timeLeft || 0)}
+            </div>
+          </div>
+
+          <div style={{
+            display: "flex",
+            gap: "5px",
+            marginBottom: "20px",
+            flexWrap: "wrap"
+          }}>
+            {currentQuiz.questions.map((q, idx) => (
+              <button
+                key={idx}
+                onClick={() => setCurrentQuestion(idx)}
+                style={{
+                  width: "40px",
+                  height: "40px",
+                  padding: "0",
+                  border: "none",
+                  borderRadius: "5px",
+                  background: answers[q.id] ? "#4caf50" : (idx === currentQuestion ? "#667eea" : "#ddd"),
+                  color: answers[q.id] ? "white" : (idx === currentQuestion ? "white" : "#333"),
+                  cursor: "pointer",
+                  fontWeight: "bold"
+                }}
+              >
+                {idx + 1}
+              </button>
+            ))}
+          </div>
+
+          <div style={{
+            background: "white",
+            padding: "30px",
+            borderRadius: "10px",
+            marginBottom: "20px"
+          }}>
+            <h3>{currentQuiz.questions[currentQuestion].text}</h3>
+            <div style={{ marginTop: "20px" }}>
+              {currentQuiz.questions[currentQuestion].options.map((option) => (
+                <label key={option.id} style={{
+                  display: "flex",
+                  alignItems: "center",
+                  padding: "12px",
+                  marginBottom: "10px",
+                  border: "2px solid #ddd",
+                  borderRadius: "5px",
+                  cursor: "pointer",
+                  background: answers[currentQuiz.questions[currentQuestion].id] === option.id ? "#e3f2fd" : "white",
+                  borderColor: answers[currentQuiz.questions[currentQuestion].id] === option.id ? "#667eea" : "#ddd"
+                }}>
+                  <input
+                    type="radio"
+                    name={`question-${currentQuiz.questions[currentQuestion].id}`}
+                    value={option.id}
+                    checked={answers[currentQuiz.questions[currentQuestion].id] === option.id}
+                    onChange={(e) => setAnswers({
+                      ...answers,
+                      [currentQuiz.questions[currentQuestion].id]: parseInt(e.target.value)
+                    })}
+                    style={{ marginRight: "10px" }}
+                  />
+                  {option.text}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: "10px" }}>
+            <button
+              onClick={() => setCurrentQuestion(Math.max(0, currentQuestion - 1))}
+              disabled={currentQuestion === 0}
+              style={{
+                padding: "10px 20px",
+                background: "#ddd",
+                border: "none",
+                borderRadius: "5px",
+                cursor: "pointer",
+                opacity: currentQuestion === 0 ? 0.5 : 1
+              }}
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => setCurrentQuestion(Math.min(currentQuiz.questions.length - 1, currentQuestion + 1))}
+              disabled={currentQuestion === currentQuiz.questions.length - 1}
+              style={{
+                padding: "10px 20px",
+                background: "#ddd",
+                border: "none",
+                borderRadius: "5px",
+                cursor: "pointer",
+                opacity: currentQuestion === currentQuiz.questions.length - 1 ? 0.5 : 1,
+                flex: 1
+              }}
+            >
+              Next
+            </button>
+            <button
+              onClick={handleSubmitQuiz}
+              style={{
+                padding: "10px 30px",
+                background: "#4caf50",
+                color: "white",
+                border: "none",
+                borderRadius: "5px",
+                cursor: "pointer",
+                fontWeight: "bold"
+              }}
+            >
+              Submit Quiz
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   // Results Page
-  if (currentPage.startsWith("results-") && token) {
-    const quizId = parseInt(currentPage.split("-")[1]);
-    const results = window.quizResults;
-    return <ResultsPage quizId={quizId} results={results} token={token} onBack={() => setCurrentPage("student-dashboard")} />;
+  if (currentPage === "results" && quizResults && currentQuiz && token) {
+    return (
+      <div style={{
+        minHeight: "100vh",
+        background: "#f5f7fa",
+        padding: "20px",
+        fontFamily: "system-ui, -apple-system, sans-serif"
+      }}>
+        <div style={{ maxWidth: "800px", margin: "0 auto" }}>
+          <div style={{
+            background: quizResults.passed ? "#c8e6c9" : "#ffcdd2",
+            padding: "30px",
+            borderRadius: "10px",
+            textAlign: "center",
+            marginBottom: "20px"
+          }}>
+            <h1 style={{
+              fontSize: "36px",
+              margin: "0 0 10px 0",
+              color: quizResults.passed ? "#2e7d32" : "#c62828"
+            }}>
+              {quizResults.passed ? "✓ Passed" : "✗ Failed"}
+            </h1>
+            <p style={{ fontSize: "24px", margin: "0", color: quizResults.passed ? "#2e7d32" : "#c62828" }}>
+              Score: {quizResults.score}%
+            </p>
+          </div>
+
+          <h2>Answer Review</h2>
+          {quizResults.answer_review.map((review) => {
+            const question = currentQuiz.questions.find(q => q.id === review.question_id);
+            const correctOption = question?.options.find(o => o.is_correct);
+            return (
+              <div key={review.question_id} style={{
+                background: "white",
+                padding: "20px",
+                borderRadius: "10px",
+                marginBottom: "15px",
+                borderLeft: `4px solid ${review.is_correct ? "#4caf50" : "#d32f2f"}`
+              }}>
+                <h3>{question?.text}</h3>
+                <p style={{ margin: "10px 0", color: review.is_correct ? "#4caf50" : "#d32f2f" }}>
+                  {review.is_correct ? "✓ Correct" : "✗ Incorrect"}
+                </p>
+                {review.user_answer && (
+                  <p><strong>Your answer:</strong> {question?.options.find(o => o.id === review.user_answer)?.text}</p>
+                )}
+                {!review.is_correct && correctOption && (
+                  <p><strong>Correct answer:</strong> {correctOption.text}</p>
+                )}
+              </div>
+            );
+          })}
+
+          <button
+            onClick={() => {
+              setCurrentPage("student-dashboard");
+              setCurrentQuiz(null);
+              setQuizResults(null);
+            }}
+            style={{
+              width: "100%",
+              padding: "15px",
+              background: "#667eea",
+              color: "white",
+              border: "none",
+              borderRadius: "5px",
+              cursor: "pointer",
+              fontWeight: "bold",
+              marginTop: "20px"
+            }}
+          >
+            Back to Dashboard
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -682,299 +981,6 @@ export default function App() {
     }}>
       <div style={{ textAlign: "center" }}>
         <h1>Loading...</h1>
-      </div>
-    </div>
-  );
-}
-
-function QuizPage({ quizId, token, onComplete }) {
-  const [quiz, setQuiz] = useState(null);
-  const [currentQuestion, setCurrentQuestion] = useState(0);
-  const [answers, setAnswers] = useState({});
-  const [timeLeft, setTimeLeft] = useState(null);
-  const [submitted, setSubmitted] = useState(false);
-
-  useEffect(() => {
-    fetchQuiz();
-  }, [quizId]);
-
-  useEffect(() => {
-    if (!quiz || submitted) return;
-    if (timeLeft === null) {
-      setTimeLeft(quiz.duration_minutes * 60);
-      return;
-    }
-    if (timeLeft <= 0) {
-      handleSubmit();
-      return;
-    }
-    const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
-    return () => clearTimeout(timer);
-  }, [timeLeft, quiz, submitted]);
-
-  const fetchQuiz = async () => {
-    try {
-      const res = await axios.get(`${API_BASE}/quizzes/${quizId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      setQuiz(res.data);
-    } catch (err) {
-      alert("Error loading quiz");
-    }
-  };
-
-  const handleSubmit = async () => {
-    setSubmitted(true);
-    try {
-      const res = await axios.post(`${API_BASE}/quizzes/${quizId}/submit`, {
-        answers: answers
-      }, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      onComplete(res.data);
-    } catch (err) {
-      alert("Error submitting quiz");
-    }
-  };
-
-  if (!quiz) return <div>Loading quiz...</div>;
-
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, "0")}`;
-  };
-
-  return (
-    <div style={{
-      minHeight: "100vh",
-      background: "#f5f7fa",
-      padding: "20px",
-      fontFamily: "system-ui, -apple-system, sans-serif"
-    }}>
-      <div style={{ maxWidth: "800px", margin: "0 auto" }}>
-        <div style={{
-          background: "white",
-          padding: "20px",
-          borderRadius: "10px",
-          marginBottom: "20px",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center"
-        }}>
-          <h2>{quiz.title}</h2>
-          <div style={{ fontSize: "20px", fontWeight: "bold", color: timeLeft < 60 ? "#d32f2f" : "#667eea" }}>
-            {formatTime(timeLeft || 0)}
-          </div>
-        </div>
-
-        <div style={{
-          display: "flex",
-          gap: "5px",
-          marginBottom: "20px",
-          flexWrap: "wrap"
-        }}>
-          {quiz.questions.map((_, idx) => (
-            <button
-              key={idx}
-              onClick={() => setCurrentQuestion(idx)}
-              style={{
-                width: "40px",
-                height: "40px",
-                padding: "0",
-                border: "none",
-                borderRadius: "5px",
-                background: answers[quiz.questions[idx].id] ? "#4caf50" : (idx === currentQuestion ? "#667eea" : "#ddd"),
-                color: answers[quiz.questions[idx].id] ? "white" : (idx === currentQuestion ? "white" : "#333"),
-                cursor: "pointer",
-                fontWeight: "bold"
-              }}
-            >
-              {idx + 1}
-            </button>
-          ))}
-        </div>
-
-        <div style={{
-          background: "white",
-          padding: "30px",
-          borderRadius: "10px",
-          marginBottom: "20px"
-        }}>
-          <h3>{quiz.questions[currentQuestion].text}</h3>
-          <div style={{ marginTop: "20px" }}>
-            {quiz.questions[currentQuestion].options.map((option) => (
-              <label key={option.id} style={{
-                display: "flex",
-                alignItems: "center",
-                padding: "12px",
-                marginBottom: "10px",
-                border: "2px solid #ddd",
-                borderRadius: "5px",
-                cursor: "pointer",
-                background: answers[quiz.questions[currentQuestion].id] === option.id ? "#e3f2fd" : "white",
-                borderColor: answers[quiz.questions[currentQuestion].id] === option.id ? "#667eea" : "#ddd"
-              }}>
-                <input
-                  type="radio"
-                  name={`question-${quiz.questions[currentQuestion].id}`}
-                  value={option.id}
-                  checked={answers[quiz.questions[currentQuestion].id] === option.id}
-                  onChange={(e) => setAnswers({
-                    ...answers,
-                    [quiz.questions[currentQuestion].id]: parseInt(e.target.value)
-                  })}
-                  style={{ marginRight: "10px" }}
-                />
-                {option.text}
-              </label>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ display: "flex", gap: "10px" }}>
-          <button
-            onClick={() => setCurrentQuestion(Math.max(0, currentQuestion - 1))}
-            disabled={currentQuestion === 0}
-            style={{
-              padding: "10px 20px",
-              background: "#ddd",
-              border: "none",
-              borderRadius: "5px",
-              cursor: "pointer",
-              opacity: currentQuestion === 0 ? 0.5 : 1
-            }}
-          >
-            Previous
-          </button>
-          <button
-            onClick={() => setCurrentQuestion(Math.min(quiz.questions.length - 1, currentQuestion + 1))}
-            disabled={currentQuestion === quiz.questions.length - 1}
-            style={{
-              padding: "10px 20px",
-              background: "#ddd",
-              border: "none",
-              borderRadius: "5px",
-              cursor: "pointer",
-              opacity: currentQuestion === quiz.questions.length - 1 ? 0.5 : 1,
-              flex: 1
-            }}
-          >
-            Next
-          </button>
-          <button
-            onClick={handleSubmit}
-            style={{
-              padding: "10px 30px",
-              background: "#4caf50",
-              color: "white",
-              border: "none",
-              borderRadius: "5px",
-              cursor: "pointer",
-              fontWeight: "bold"
-            }}
-          >
-            Submit Quiz
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ResultsPage({ quizId, results, token, onBack }) {
-  const [questions, setQuestions] = useState([]);
-
-  useEffect(() => {
-    fetchQuizDetails();
-  }, [quizId]);
-
-  const fetchQuizDetails = async () => {
-    try {
-      const res = await axios.get(`${API_BASE}/quizzes/${quizId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      setQuestions(res.data.questions);
-    } catch (err) {
-      console.error("Error fetching quiz details:", err);
-    }
-  };
-
-  const getCorrectOption = (questionId) => {
-    const question = questions.find(q => q.id === questionId);
-    if (!question) return null;
-    return question.options.find(o => o.is_correct);
-  };
-
-  return (
-    <div style={{
-      minHeight: "100vh",
-      background: "#f5f7fa",
-      padding: "20px",
-      fontFamily: "system-ui, -apple-system, sans-serif"
-    }}>
-      <div style={{ maxWidth: "800px", margin: "0 auto" }}>
-        <div style={{
-          background: results.passed ? "#c8e6c9" : "#ffcdd2",
-          padding: "30px",
-          borderRadius: "10px",
-          textAlign: "center",
-          marginBottom: "20px"
-        }}>
-          <h1 style={{
-            fontSize: "36px",
-            margin: "0 0 10px 0",
-            color: results.passed ? "#2e7d32" : "#c62828"
-          }}>
-            {results.passed ? "✓ Passed" : "✗ Failed"}
-          </h1>
-          <p style={{ fontSize: "24px", margin: "0", color: results.passed ? "#2e7d32" : "#c62828" }}>
-            Score: {results.score}%
-          </p>
-        </div>
-
-        <h2>Answer Review</h2>
-        {results.answer_review.map((review) => {
-          const correctOption = getCorrectOption(review.question_id);
-          const question = questions.find(q => q.id === review.question_id);
-          return (
-            <div key={review.question_id} style={{
-              background: "white",
-              padding: "20px",
-              borderRadius: "10px",
-              marginBottom: "15px",
-              borderLeft: `4px solid ${review.is_correct ? "#4caf50" : "#d32f2f"}`
-            }}>
-              <h3>{question?.text}</h3>
-              <p style={{ margin: "10px 0", color: review.is_correct ? "#4caf50" : "#d32f2f" }}>
-                {review.is_correct ? "✓ Correct" : "✗ Incorrect"}
-              </p>
-              {review.user_answer && (
-                <p><strong>Your answer:</strong> {question?.options.find(o => o.id === review.user_answer)?.text}</p>
-              )}
-              {!review.is_correct && correctOption && (
-                <p><strong>Correct answer:</strong> {correctOption.text}</p>
-              )}
-            </div>
-          );
-        })}
-
-        <button
-          onClick={onBack}
-          style={{
-            width: "100%",
-            padding: "15px",
-            background: "#667eea",
-            color: "white",
-            border: "none",
-            borderRadius: "5px",
-            cursor: "pointer",
-            fontWeight: "bold",
-            marginTop: "20px"
-          }}
-        >
-          Back to Dashboard
-        </button>
       </div>
     </div>
   );
