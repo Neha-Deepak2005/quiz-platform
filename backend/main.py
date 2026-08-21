@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, ForeignKey, Text
@@ -21,7 +21,7 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     email = Column(String, unique=True)
     password = Column(String)
-    role = Column(String, default="STUDENT")  # ADMIN or STUDENT
+    role = Column(String, default="STUDENT")
     name = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
 
@@ -40,7 +40,7 @@ class Quiz(Base):
     difficulty = Column(String)
     duration = Column(Integer)
     passing_score = Column(Float, default=60.0)
-    status = Column(String, default="DRAFT")  # DRAFT or PUBLISHED
+    status = Column(String, default="DRAFT")
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class Question(Base):
@@ -65,7 +65,7 @@ class Attempt(Base):
     quiz_id = Column(Integer, ForeignKey("quizzes.id"))
     score = Column(Float, default=0.0)
     percentage = Column(Float, default=0.0)
-    status = Column(String, default="PASSED")  # PASSED or FAILED
+    status = Column(String, default="PASSED")
     started_at = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
 
@@ -83,23 +83,6 @@ Base.metadata.create_all(bind=engine)
 class UserLogin(BaseModel):
     email: str
     password: str
-
-class QuizResponse(BaseModel):
-    id: int
-    title: str
-    description: str
-    difficulty: str
-    duration: int
-    passing_score: float
-    status: str
-
-class AttemptResponse(BaseModel):
-    id: int
-    quiz_id: int
-    score: float
-    percentage: float
-    status: str
-    completed_at: datetime
 
 # FastAPI app
 app = FastAPI(title="Quiz Platform")
@@ -131,6 +114,23 @@ def verify_token(token: str):
         return int(payload["sub"])
     except:
         return None
+
+def get_current_user(authorization: str = Header(None)):
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing token")
+    try:
+        parts = authorization.split(" ")
+        if len(parts) != 2:
+            raise HTTPException(status_code=401, detail="Invalid token format")
+        token = parts[1]
+        user_id = verify_token(token)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return user_id
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=401, detail="Token verification failed")
 
 # Routes
 @app.post("/api/auth/login")
@@ -174,21 +174,17 @@ def get_published_quizzes(db: Session = Depends(get_db)):
 
 @app.get("/api/quizzes/{quiz_id}")
 def get_quiz(quiz_id: int, db: Session = Depends(get_db)):
-    quiz = db.query(Quiz).filter(Quiz.id == quiz_id).first()
-    if not quiz:
-        raise HTTPException(status_code=404, detail="Quiz not found")
+    try:
+        quiz = db.query(Quiz).filter(Quiz.id == quiz_id).first()
+        if not quiz:
+            raise HTTPException(status_code=404, detail="Quiz not found")
 
-    questions = db.query(Question).filter(Question.quiz_id == quiz_id).all()
+        questions = db.query(Question).filter(Question.quiz_id == quiz_id).all()
 
-    return {
-        "id": quiz.id,
-        "title": quiz.title,
-        "description": quiz.description,
-        "difficulty": quiz.difficulty,
-        "duration": quiz.duration,
-        "passing_score": quiz.passing_score,
-        "questions": [
-            {
+        questions_data = []
+        for q in questions:
+            options = db.query(Option).filter(Option.question_id == q.id).all()
+            questions_data.append({
                 "id": q.id,
                 "question_text": q.question_text,
                 "marks": q.marks,
@@ -198,82 +194,88 @@ def get_quiz(quiz_id: int, db: Session = Depends(get_db)):
                         "option_text": o.option_text,
                         "is_correct": o.is_correct
                     }
-                    for o in db.query(Option).filter(Option.question_id == q.id).all()
+                    for o in options
                 ]
-            }
-            for q in questions
-        ]
-    }
+            })
 
-@app.post("/api/quizzes/{quiz_id}/start")
-def start_quiz(quiz_id: int, db: Session = Depends(get_db)):
-    quiz = db.query(Quiz).filter(Quiz.id == quiz_id).first()
-    if not quiz:
-        raise HTTPException(status_code=404, detail="Quiz not found")
-
-    attempt = Attempt(user_id=1, quiz_id=quiz_id)
-    db.add(attempt)
-    db.commit()
-    db.refresh(attempt)
-
-    return {"attempt_id": attempt.id}
+        return {
+            "id": quiz.id,
+            "title": quiz.title,
+            "description": quiz.description,
+            "difficulty": quiz.difficulty,
+            "duration": quiz.duration,
+            "passing_score": quiz.passing_score,
+            "status": quiz.status,
+            "questions": questions_data
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in get_quiz: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error loading quiz")
 
 @app.post("/api/quizzes/{quiz_id}/submit")
-def submit_quiz(quiz_id: int, data: dict, db: Session = Depends(get_db)):
-    attempt = db.query(Attempt).filter(Attempt.quiz_id == quiz_id, Attempt.user_id == 1).first()
-    if not attempt:
-        raise HTTPException(status_code=404, detail="Attempt not found")
+def submit_quiz(quiz_id: int, data: dict, db: Session = Depends(get_db), user_id: int = Depends(get_current_user)):
+    try:
+        attempt = db.query(Attempt).filter(Attempt.quiz_id == quiz_id, Attempt.user_id == user_id).order_by(Attempt.id.desc()).first()
+        if not attempt:
+            attempt = Attempt(user_id=user_id, quiz_id=quiz_id)
+            db.add(attempt)
+            db.commit()
+            db.refresh(attempt)
 
-    answers = data.get("answers", [])
-    correct_count = 0
-    total_marks = 0
+        answers_data = data.get("answers", {})
+        if not answers_data:
+            raise HTTPException(status_code=400, detail="No answers provided")
 
-    for answer in answers:
-        q_id = answer["question_id"]
-        option_id = answer.get("selected_option_id")
+        correct_count = 0
+        total_marks = 0
 
-        question = db.query(Question).filter(Question.id == q_id).first()
-        total_marks += question.marks if question else 1
+        if isinstance(answers_data, dict):
+            for q_id_str, option_id in answers_data.items():
+                try:
+                    q_id = int(q_id_str)
+                    option_id = int(option_id)
+                except:
+                    continue
 
-        if option_id:
-            option = db.query(Option).filter(Option.id == option_id).first()
-            is_correct = option and option.is_correct
+                question = db.query(Question).filter(Question.id == q_id).first()
+                if not question:
+                    continue
 
-            if is_correct:
-                correct_count += question.marks if question else 1
+                total_marks += question.marks
 
-            ans = Answer(attempt_id=attempt.id, question_id=q_id, selected_option_id=option_id, is_correct=is_correct)
-            db.add(ans)
+                option = db.query(Option).filter(Option.id == option_id).first()
+                is_correct = option and option.is_correct
 
-    attempt.score = correct_count
-    attempt.percentage = (correct_count / total_marks * 100) if total_marks > 0 else 0
-    attempt.status = "PASSED" if attempt.percentage >= 33 else "FAILED"
-    attempt.completed_at = datetime.utcnow()
-    db.commit()
-    db.refresh(attempt)
+                if is_correct:
+                    correct_count += question.marks
 
-    return {
-        "id": attempt.id,
-        "score": attempt.score,
-        "percentage": attempt.percentage,
-        "status": attempt.status,
-        "completed_at": attempt.completed_at
-    }
+                ans = Answer(attempt_id=attempt.id, question_id=q_id, selected_option_id=option_id, is_correct=is_correct)
+                db.add(ans)
 
-@app.get("/api/attempts/{attempt_id}")
-def get_attempt(attempt_id: int, db: Session = Depends(get_db)):
-    attempt = db.query(Attempt).filter(Attempt.id == attempt_id).first()
-    if not attempt:
-        raise HTTPException(status_code=404, detail="Attempt not found")
+        db.commit()
 
-    return {
-        "id": attempt.id,
-        "quiz_id": attempt.quiz_id,
-        "score": attempt.score,
-        "percentage": attempt.percentage,
-        "status": attempt.status,
-        "completed_at": attempt.completed_at
-    }
+        attempt.score = correct_count
+        attempt.percentage = (correct_count / total_marks * 100) if total_marks > 0 else 0
+        attempt.status = "PASSED" if attempt.percentage >= 33 else "FAILED"
+        attempt.completed_at = datetime.utcnow()
+        db.commit()
+        db.refresh(attempt)
+
+        return {
+            "id": attempt.id,
+            "score": attempt.score,
+            "percentage": attempt.percentage,
+            "status": attempt.status,
+            "completed_at": attempt.completed_at
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in submit_quiz: {str(e)}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Error submitting quiz")
 
 @app.post("/api/admin/quizzes")
 def create_quiz(data: dict, db: Session = Depends(get_db)):
@@ -314,31 +316,47 @@ def get_admin_quizzes(db: Session = Depends(get_db)):
 
 @app.post("/api/admin/quizzes/{quiz_id}/add-question")
 def add_question(quiz_id: int, data: dict, db: Session = Depends(get_db)):
-    quiz = db.query(Quiz).filter(Quiz.id == quiz_id).first()
-    if not quiz:
-        raise HTTPException(status_code=404, detail="Quiz not found")
+    try:
+        quiz = db.query(Quiz).filter(Quiz.id == quiz_id).first()
+        if not quiz:
+            raise HTTPException(status_code=404, detail="Quiz not found")
 
-    question = Question(
-        quiz_id=quiz_id,
-        question_text=data.get("question_text"),
-        marks=data.get("marks", 1.0),
-        difficulty=data.get("difficulty", "Easy")
-    )
-    db.add(question)
-    db.commit()
-    db.refresh(question)
+        question_text = data.get("question_text", "").strip()
+        if not question_text:
+            raise HTTPException(status_code=400, detail="Question text required")
 
-    options = data.get("options", [])
-    for option_text in options:
-        option = Option(
-            question_id=question.id,
-            option_text=option_text.get("text"),
-            is_correct=option_text.get("is_correct", False)
+        options = data.get("options", [])
+        if not options or len(options) == 0:
+            raise HTTPException(status_code=400, detail="At least one option required")
+
+        question = Question(
+            quiz_id=quiz_id,
+            question_text=question_text,
+            marks=float(data.get("marks", 1.0)),
+            difficulty=data.get("difficulty", "Medium")
         )
-        db.add(option)
+        db.add(question)
+        db.commit()
+        db.refresh(question)
 
-    db.commit()
-    return {"id": question.id, "question_text": question.question_text}
+        for opt in options:
+            opt_text = str(opt.get("text", "")).strip()
+            if opt_text:
+                option = Option(
+                    question_id=question.id,
+                    option_text=opt_text,
+                    is_correct=bool(opt.get("is_correct", False))
+                )
+                db.add(option)
+
+        db.commit()
+        return {"id": question.id, "question_text": question.question_text}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"Error in add_question: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error adding question")
 
 @app.post("/api/admin/quizzes/{quiz_id}/publish")
 def publish_quiz(quiz_id: int, db: Session = Depends(get_db)):
@@ -404,13 +422,11 @@ def seed_data():
         db.commit()
         db.refresh(quiz)
 
-        # Add questions
         q1 = Question(quiz_id=quiz.id, question_text="What is the capital of France?", difficulty="Easy", marks=1.0)
         q2 = Question(quiz_id=quiz.id, question_text="What is 2+2?", difficulty="Easy", marks=1.0)
         db.add_all([q1, q2])
         db.commit()
 
-        # Add options - using db.add_all for all options
         options_list = [
             Option(question_id=q1.id, option_text="London", is_correct=False),
             Option(question_id=q1.id, option_text="Paris", is_correct=True),
@@ -424,8 +440,7 @@ def seed_data():
 
     db.close()
 
-# Mount static files for frontend
-# Check if build directory exists, if not create a fallback
+# Mount static files
 if os.path.exists("../frontend/build"):
     app.mount("/", StaticFiles(directory="../frontend/build", html=True), name="static")
 elif os.path.exists("./frontend/build"):
