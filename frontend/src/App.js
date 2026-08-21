@@ -52,7 +52,7 @@ export default function App() {
   useEffect(() => {
     if (!currentQuiz || submitted || currentPage !== "quiz-taking") return;
     if (timeLeft === null && currentQuiz) {
-      setTimeLeft(currentQuiz.duration_minutes * 60);
+      setTimeLeft(currentQuiz.duration * 60);
       return;
     }
     if (timeLeft <= 0) {
@@ -73,7 +73,7 @@ export default function App() {
 
   const fetchAdminQuizzes = async () => {
     try {
-      const res = await axios.get(`${API_BASE}/quizzes`, {
+      const res = await axios.get(`${API_BASE}/admin/quizzes`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setAdminQuizzes(res.data);
@@ -84,7 +84,7 @@ export default function App() {
 
   const fetchStudentQuizzes = async () => {
     try {
-      const res = await axios.get(`${API_BASE}/quizzes`, {
+      const res = await axios.get(`${API_BASE}/quizzes/published`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setStudentQuizzes(res.data);
@@ -154,10 +154,10 @@ export default function App() {
   const handleCreateQuiz = async (e) => {
     e.preventDefault();
     try {
-      await axios.post(`${API_BASE}/quizzes`, {
+      await axios.post(`${API_BASE}/admin/quizzes`, {
         title: quizTitle,
         description: quizDesc,
-        duration_minutes: parseInt(quizDuration)
+        duration: parseInt(quizDuration)
       }, {
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -648,7 +648,7 @@ export default function App() {
                   <h3>{quiz.title}</h3>
                   <p style={{ color: "#666" }}>{quiz.description}</p>
                   <p style={{ fontSize: "14px", color: "#999" }}>
-                    Duration: {quiz.duration_minutes} minutes
+                    Duration: {quiz.duration} minutes | Status: {quiz.status}
                   </p>
                   <button
                     onClick={() => alert("Edit functionality coming soon")}
@@ -722,7 +722,7 @@ export default function App() {
                 <h3>{quiz.title}</h3>
                 <p style={{ color: "#666" }}>{quiz.description}</p>
                 <p style={{ fontSize: "14px", color: "#999" }}>
-                  Duration: {quiz.duration_minutes} minutes
+                  Duration: {quiz.duration} minutes
                 </p>
                 <button
                   onClick={() => {
@@ -810,7 +810,7 @@ export default function App() {
             borderRadius: "10px",
             marginBottom: "20px"
           }}>
-            <h3>{currentQuiz.questions[currentQuestion].text}</h3>
+            <h3>{currentQuiz.questions[currentQuestion].question_text}</h3>
             <div style={{ marginTop: "20px" }}>
               {currentQuiz.questions[currentQuestion].options.map((option) => (
                 <label key={option.id} style={{
@@ -835,7 +835,7 @@ export default function App() {
                     })}
                     style={{ marginRight: "10px" }}
                   />
-                  {option.text}
+                  {option.option_text}
                 </label>
               ))}
             </div>
@@ -902,7 +902,7 @@ export default function App() {
       }}>
         <div style={{ maxWidth: "800px", margin: "0 auto" }}>
           <div style={{
-            background: quizResults.passed ? "#c8e6c9" : "#ffcdd2",
+            background: quizResults.status === "PASSED" ? "#c8e6c9" : "#ffcdd2",
             padding: "30px",
             borderRadius: "10px",
             textAlign: "center",
@@ -911,40 +911,14 @@ export default function App() {
             <h1 style={{
               fontSize: "36px",
               margin: "0 0 10px 0",
-              color: quizResults.passed ? "#2e7d32" : "#c62828"
+              color: quizResults.status === "PASSED" ? "#2e7d32" : "#c62828"
             }}>
-              {quizResults.passed ? "✓ Passed" : "✗ Failed"}
+              {quizResults.status === "PASSED" ? "✓ Passed" : "✗ Failed"}
             </h1>
-            <p style={{ fontSize: "24px", margin: "0", color: quizResults.passed ? "#2e7d32" : "#c62828" }}>
-              Score: {quizResults.score}%
+            <p style={{ fontSize: "24px", margin: "0", color: quizResults.status === "PASSED" ? "#2e7d32" : "#c62828" }}>
+              Score: {Math.round(quizResults.percentage)}%
             </p>
           </div>
-
-          <h2>Answer Review</h2>
-          {quizResults.answer_review.map((review) => {
-            const question = currentQuiz.questions.find(q => q.id === review.question_id);
-            const correctOption = question?.options.find(o => o.is_correct);
-            return (
-              <div key={review.question_id} style={{
-                background: "white",
-                padding: "20px",
-                borderRadius: "10px",
-                marginBottom: "15px",
-                borderLeft: `4px solid ${review.is_correct ? "#4caf50" : "#d32f2f"}`
-              }}>
-                <h3>{question?.text}</h3>
-                <p style={{ margin: "10px 0", color: review.is_correct ? "#4caf50" : "#d32f2f" }}>
-                  {review.is_correct ? "✓ Correct" : "✗ Incorrect"}
-                </p>
-                {review.user_answer && (
-                  <p><strong>Your answer:</strong> {question?.options.find(o => o.id === review.user_answer)?.text}</p>
-                )}
-                {!review.is_correct && correctOption && (
-                  <p><strong>Correct answer:</strong> {correctOption.text}</p>
-                )}
-              </div>
-            );
-          })}
 
           <button
             onClick={() => {
